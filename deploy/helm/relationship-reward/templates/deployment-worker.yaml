@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.worker.env.NODE_ENV | quote }}
+            - name: WORKER_CONCURRENCY
+              value: {{ .Values.worker.env.WORKER_CONCURRENCY | quote }}
+            - name: AWS_REGION
+              value: {{ .Values.global.awsRegion | quote }}
+            - name: SCHEDULER_SERVICE_URL
+              value: {{ .Values.global.schedulerServiceUrl | quote }}
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: relationship-reward-app-secrets
+                  key: MONGODB_URI
+            - name: JWT_ACCESS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: relationship-reward-app-secrets
+                  key: JWT_ACCESS_SECRET
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: relationship-reward-app-secrets
+                  key: JWT_REFRESH_SECRET
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: relationship-reward-app-secrets
+                  key: REDIS_URL
+            - name: SES_FROM_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: relationship-reward-app-secrets
+                  key: SES_FROM_EMAIL
+          resources:
+{{ toYaml .Values.worker.resources | indent 12 }}

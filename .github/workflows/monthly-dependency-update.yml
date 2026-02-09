@@ -1,0 +1,87 @@
+name: monthly-dependency-update
+
+on:
+  schedule:
+    - cron: "0 5 1 * *"
+  workflow_dispatch:
+
+jobs:
+  update-dependencies:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Update JS dependencies
+        run: pnpm up -r --latest
+
+      - name: Update Python dependencies and lock
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install uv
+          cd apps/scheduler-py
+          uv lock --upgrade
+
+      - name: Sync scheduler audit requirements
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          pyproject_path = Path("apps/scheduler-py/pyproject.toml")
+          data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+          deps = data.get("project", {}).get("dependencies", [])
+          output_deps = list(deps)
+          if any(dep.startswith("numpy==") for dep in deps):
+            # Keep local/audit compatibility for scanners running older Python.
+            output_deps.append('numpy==2.0.2; python_version < "3.11"')
+          out = Path("apps/scheduler-py/requirements.audit.txt")
+          out.write_text("\n".join(output_deps) + "\n", encoding="utf-8")
+          PY
+
+      - name: Reinstall and verify
+        run: |
+          pnpm install
+          pnpm -r build
+          pnpm -r test
+          cd apps/scheduler-py
+          uv sync --group dev
+          uv run pytest --cov=src/scheduler_py --cov-report=term --cov-fail-under=80
+
+      - name: Security scans
+        run: |
+          corepack pnpm audit --audit-level=low
+          python -m pip install pip-audit==2.7.3
+          pip-audit -r apps/scheduler-py/requirements.audit.txt
+
+      - name: Create dependency update PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: codex/monthly-dependency-updates
+          commit-message: "chore: monthly dependency updates"
+          title: "chore: monthly dependency updates"
+          body: |
+            Monthly automated dependency update.
+            - Updated JS dependencies to latest stable
+            - Updated Python lockfile
+            - Synced Python audit requirements file
+            - Rebuilt and re-tested workspace
+          labels: |
+            dependencies
+            security

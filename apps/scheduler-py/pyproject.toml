@@ -1,0 +1,26 @@
+[project]
+name = "scheduler-py"
+version = "0.1.0"
+description = "Variable reward scheduling service"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.128.5",
+  "uvicorn==0.39.0",
+  "pydantic==2.12.5",
+  "numpy==2.3.5"
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.3.4",
+  "pytest-asyncio==0.25.3",
+  "pytest-cov==6.0.0",
+  "httpx==0.28.1"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"

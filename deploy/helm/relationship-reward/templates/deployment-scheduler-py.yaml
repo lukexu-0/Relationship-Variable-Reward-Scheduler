@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler-py
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.schedulerPy.replicaCount }}
+  selector:
+    matchLabels:
+      app: scheduler-py
+  template:
+    metadata:
+      labels:
+        app: scheduler-py
+    spec:
+      containers:
+        - name: scheduler-py
+          image: "{{ .Values.schedulerPy.image.repository }}:{{ .Values.schedulerPy.image.tag }}"
+          imagePullPolicy: {{ .Values.schedulerPy.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.schedulerPy.service.port }}
+          env:
+            - name: SCHEDULER_PORT
+              value: {{ .Values.schedulerPy.env.SCHEDULER_PORT | quote }}
+          resources:
+{{ toYaml .Values.schedulerPy.resources | indent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.schedulerPy.service.port }}
+            initialDelaySeconds: 8
+            periodSeconds: 10

@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  mongo:
+    image: mongo:8
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  scheduler-py:
+    build:
+      context: .
+      dockerfile: apps/scheduler-py/Dockerfile
+    environment:
+      - SCHEDULER_PORT=8000
+    ports:
+      - "8000:8000"
+
+volumes:
+  mongo_data:

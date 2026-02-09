@@ -1,0 +1,14 @@
+node_modules
+.pnpm-store
+dist
+coverage
+.env
+.env.*
+*.log
+.DS_Store
+.pytest_cache
+.venv
+__pycache__
+.mypy_cache
+apps/scheduler-py/.ruff_cache
+apps/scheduler-py/.venv

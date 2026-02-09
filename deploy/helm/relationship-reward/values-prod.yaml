@@ -1,0 +1,32 @@
+namespace: relationship-reward-prod
+
+ingress:
+  enabled: true
+  host: app.example.com
+  apiHost: api.example.com
+
+web:
+  replicaCount: 2
+  image:
+    tag: prod
+  env:
+    VITE_API_BASE_URL: https://api.example.com
+
+api:
+  replicaCount: 2
+  image:
+    tag: prod
+  env:
+    CORS_ORIGINS: https://app.example.com
+
+worker:
+  replicaCount: 1
+  env:
+    WORKER_CONCURRENCY: "5"
+  image:
+    tag: prod
+
+schedulerPy:
+  replicaCount: 2
+  image:
+    tag: prod

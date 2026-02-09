@@ -1,0 +1,100 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Resolve deploy variables
+        run: |
+          ENVIRONMENT=${{ inputs.environment }}
+          IMAGE_TAG="${GITHUB_SHA::12}-${ENVIRONMENT}"
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          if [ "$ENVIRONMENT" = "prod" ]; then
+            echo "NAMESPACE=relationship-reward-prod" >> $GITHUB_ENV
+            echo "WEB_ORIGIN=https://app.example.com" >> $GITHUB_ENV
+            echo "API_BASE_URL=https://api.example.com" >> $GITHUB_ENV
+          else
+            echo "NAMESPACE=relationship-reward-dev" >> $GITHUB_ENV
+            echo "WEB_ORIGIN=https://dev.app.example.com" >> $GITHUB_ENV
+            echo "API_BASE_URL=https://dev.api.example.com" >> $GITHUB_ENV
+          fi
+
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+          echo "ECR_BASE=${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com" >> $GITHUB_ENV
+
+      - name: Build and push images
+        run: |
+          docker build -f apps/api/Dockerfile -t "${ECR_BASE}/reward-api:${IMAGE_TAG}" .
+          docker build -f apps/worker/Dockerfile -t "${ECR_BASE}/reward-worker:${IMAGE_TAG}" .
+          docker build -f apps/scheduler-py/Dockerfile -t "${ECR_BASE}/reward-scheduler-py:${IMAGE_TAG}" .
+          docker build -f apps/web/Dockerfile \
+            --build-arg VITE_API_BASE_URL="${API_BASE_URL}" \
+            -t "${ECR_BASE}/reward-web:${IMAGE_TAG}" .
+
+          docker push "${ECR_BASE}/reward-api:${IMAGE_TAG}"
+          docker push "${ECR_BASE}/reward-worker:${IMAGE_TAG}"
+          docker push "${ECR_BASE}/reward-scheduler-py:${IMAGE_TAG}"
+          docker push "${ECR_BASE}/reward-web:${IMAGE_TAG}"
+
+      - name: Configure kubectl for target cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name relationship-reward-${{ inputs.environment }} \
+            --region us-east-1
+
+      - name: Deploy with Helm
+        run: |
+          ENV=${{ inputs.environment }}
+          helm upgrade --install relationship-reward deploy/helm/relationship-reward \
+            --namespace ${NAMESPACE} \
+            --create-namespace \
+            --values deploy/helm/relationship-reward/values-${ENV}.yaml \
+            --set namespace=${NAMESPACE} \
+            --set web.image.repository=${ECR_BASE}/reward-web \
+            --set web.image.tag=${IMAGE_TAG} \
+            --set web.env.VITE_API_BASE_URL=${API_BASE_URL} \
+            --set api.image.repository=${ECR_BASE}/reward-api \
+            --set api.image.tag=${IMAGE_TAG} \
+            --set api.env.CORS_ORIGINS=${WEB_ORIGIN} \
+            --set worker.image.repository=${ECR_BASE}/reward-worker \
+            --set worker.image.tag=${IMAGE_TAG} \
+            --set schedulerPy.image.repository=${ECR_BASE}/reward-scheduler-py \
+            --set schedulerPy.image.tag=${IMAGE_TAG}

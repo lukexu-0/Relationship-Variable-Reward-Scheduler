@@ -1,0 +1,102 @@
+namespace: relationship-reward-dev
+
+imagePullSecrets: []
+
+global:
+  awsRegion: us-east-1
+  schedulerServiceUrl: http://scheduler-py:8000
+
+web:
+  replicaCount: 1
+  image:
+    repository: your-ecr/web
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+  env:
+    VITE_API_BASE_URL: https://api.example.com
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+api:
+  replicaCount: 1
+  image:
+    repository: your-ecr/api
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 3001
+  env:
+    NODE_ENV: production
+    API_PORT: "3001"
+    CORS_ORIGINS: https://app.example.com
+  resources:
+    requests:
+      cpu: 150m
+      memory: 256Mi
+    limits:
+      cpu: 750m
+      memory: 512Mi
+
+worker:
+  replicaCount: 1
+  image:
+    repository: your-ecr/worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  env:
+    NODE_ENV: production
+    WORKER_CONCURRENCY: "3"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+
+schedulerPy:
+  replicaCount: 1
+  image:
+    repository: your-ecr/scheduler-py
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8000
+  env:
+    SCHEDULER_PORT: "8000"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+
+ingress:
+  enabled: false
+  className: alb
+  host: app.example.com
+  apiHost: api.example.com
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+secrets:
+  externalSecretName: relationship-reward-secrets
+  storeRefName: aws-secrets-manager
+  data:
+    MONGODB_URI: /relationship-reward/MONGODB_URI
+    JWT_ACCESS_SECRET: /relationship-reward/JWT_ACCESS_SECRET
+    JWT_REFRESH_SECRET: /relationship-reward/JWT_REFRESH_SECRET
+    REDIS_URL: /relationship-reward/REDIS_URL
+    SES_FROM_EMAIL: /relationship-reward/SES_FROM_EMAIL

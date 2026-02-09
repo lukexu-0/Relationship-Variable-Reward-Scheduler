@@ -1,0 +1,26 @@
+namespace: relationship-reward-dev
+
+ingress:
+  enabled: false
+  host: dev.app.example.com
+  apiHost: dev.api.example.com
+
+web:
+  image:
+    tag: dev
+  env:
+    VITE_API_BASE_URL: https://dev.api.example.com
+
+api:
+  image:
+    tag: dev
+  env:
+    CORS_ORIGINS: https://dev.app.example.com
+
+worker:
+  image:
+    tag: dev
+
+schedulerPy:
+  image:
+    tag: dev

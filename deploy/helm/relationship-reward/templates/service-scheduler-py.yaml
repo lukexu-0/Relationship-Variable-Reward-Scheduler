@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduler-py
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: scheduler-py
+  ports:
+    - port: 8000
+      targetPort: {{ .Values.schedulerPy.service.port }}
