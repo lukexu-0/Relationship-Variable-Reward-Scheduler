@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@reward/shared-types": "workspace:*",
@@ -23,6 +24,7 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.0",
     "@testing-library/user-event": "14.6.1",
+    "@playwright/test": "1.55.0",
     "@vitest/coverage-v8": "4.0.18",
     "@types/react": "19.2.13",
     "@types/react-dom": "19.2.3",

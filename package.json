@@ -6,6 +6,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
+    "local:start": "bash tools/local/run-local.sh",
+    "local:start:no-worker": "bash tools/local/run-local.sh --no-worker",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",

@@ -103,18 +103,28 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
 
   const profiles = useMemo<Profile[]>(() => profilesQuery.data?.profiles ?? [], [profilesQuery.data]);
   const templates = useMemo<Template[]>(() => templatesQuery.data?.templates ?? [], [templatesQuery.data]);
-  const events = useMemo<RewardEvent[]>(() => eventsQuery.data?.events ?? [], [eventsQuery.data]);
-  const settings = useMemo<ScheduleSettings>(
+  const events = useMemo<RewardEvent[]>(
     () =>
-      settingsQuery.data?.settings ?? {
-        timezone: fallbackTimezone,
-        reminderLeadHours: 24,
-        minGapHours: 24,
-        allowedWindows: [{ weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" }],
-        blackoutDates: []
-      },
-    [fallbackTimezone, settingsQuery.data]
+      (eventsQuery.data?.events ?? []).map((event) => ({
+        ...event,
+        status: event.status ?? "SCHEDULED",
+        adjustments: Array.isArray(event.adjustments) ? event.adjustments : []
+      })),
+    [eventsQuery.data]
   );
+  const settings = useMemo<ScheduleSettings>(() => {
+    const rawSettings = settingsQuery.data?.settings;
+
+    return {
+      timezone: rawSettings?.timezone ?? fallbackTimezone,
+      reminderLeadHours: rawSettings?.reminderLeadHours ?? 24,
+      minGapHours: rawSettings?.minGapHours ?? 24,
+      allowedWindows: Array.isArray(rawSettings?.allowedWindows)
+        ? rawSettings.allowedWindows
+        : [{ weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" }],
+      blackoutDates: Array.isArray(rawSettings?.blackoutDates) ? rawSettings.blackoutDates : []
+    };
+  }, [fallbackTimezone, settingsQuery.data?.settings]);
 
   useEffect(() => {
     if (!selectedProfileId && profiles.length > 0) {

@@ -92,6 +92,23 @@ cd /Users/lukexu/cs-projects/Relationship-Variable-Reward-Scheduler
 corepack pnpm --filter @reward/worker dev
 ```
 
+### One-command local startup script
+You can launch the full stack in one terminal:
+
+```bash
+cd /Users/lukexu/cs-projects/Relationship-Variable-Reward-Scheduler
+corepack pnpm local:start
+```
+
+Useful variants:
+
+```bash
+corepack pnpm local:start:no-worker
+bash tools/local/run-local.sh --skip-docker --skip-sync
+```
+
+Ctrl+C stops all started services.
+
 ## 5.1 One-time category-set normalization (existing databases)
 Run this once when upgrading an existing database to the category-set model.
 

@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { Component, useState, type ReactNode } from "react";
 
+import type { AuthUser } from "./lib/api/client";
 import { Badge } from "./components/ui/Badge";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
@@ -12,13 +13,6 @@ import { ScheduleSettingsPanel } from "./features/settings/ScheduleSettingsPanel
 
 function Dashboard() {
   const auth = useAuth();
-  const [profileName, setProfileName] = useState("");
-  const [partnerName, setPartnerName] = useState("");
-
-  const dashboard = useDashboardData({
-    accessToken: auth.accessToken ?? "",
-    fallbackTimezone: auth.user?.timezone ?? "UTC"
-  });
 
   if (auth.loading) {
     return <div className="page">Loading...</div>;
@@ -28,25 +22,49 @@ function Dashboard() {
     return <AuthPanel />;
   }
 
-  const setListItems = useMemo(
-    () =>
-      dashboard.templates.map((template) => {
-        const eventsInCategory = dashboard.events.filter((event) => event.category === template.category);
-        const upcomingCount = eventsInCategory.filter(
-          (event) =>
-            (event.status === "SCHEDULED" || event.status === "RESCHEDULED") &&
-            new Date(event.scheduledAt).getTime() > Date.now()
-        ).length;
-
-        return {
-          category: template.category,
-          name: template.name,
-          totalCount: eventsInCategory.length,
-          upcomingCount
-        };
-      }),
-    [dashboard.events, dashboard.templates]
+  return (
+    <AuthenticatedDashboard
+      accessToken={auth.accessToken}
+      user={auth.user}
+      onLogout={auth.logout}
+    />
   );
+}
+
+interface AuthenticatedDashboardProps {
+  accessToken: string;
+  user: AuthUser;
+  onLogout: () => Promise<void>;
+}
+
+function AuthenticatedDashboard({ accessToken, user, onLogout }: AuthenticatedDashboardProps) {
+  const [profileName, setProfileName] = useState("");
+  const [partnerName, setPartnerName] = useState("");
+
+  const dashboard = useDashboardData({
+    accessToken,
+    fallbackTimezone: user.timezone
+  });
+
+  if (dashboard.loading) {
+    return <div className="page">Loading dashboard...</div>;
+  }
+
+  const setListItems = dashboard.templates.map((template) => {
+    const eventsInCategory = dashboard.events.filter((event) => event.category === template.category);
+    const upcomingCount = eventsInCategory.filter(
+      (event) =>
+        (event.status === "SCHEDULED" || event.status === "RESCHEDULED") &&
+        new Date(event.scheduledAt).getTime() > Date.now()
+    ).length;
+
+    return {
+      category: template.category,
+      name: template.name,
+      totalCount: eventsInCategory.length,
+      upcomingCount
+    };
+  });
 
   const activeError = [
     dashboard.createSetMutation,
@@ -64,10 +82,10 @@ function Dashboard() {
         <div>
           <h1>Variable Reward Scheduler</h1>
           <p>
-            Signed in as {auth.user.email} ({auth.user.timezone})
+            Signed in as {user.email} ({user.timezone})
           </p>
         </div>
-        <Button variant="soft" onClick={auth.logout}>
+        <Button variant="soft" onClick={onLogout}>
           Logout
         </Button>
       </header>
@@ -204,7 +222,51 @@ function Dashboard() {
 export function App() {
   return (
     <AuthProvider>
-      <Dashboard />
+      <DashboardErrorBoundary>
+        <Dashboard />
+      </DashboardErrorBoundary>
     </AuthProvider>
   );
+}
+
+interface DashboardErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface DashboardErrorBoundaryState {
+  hasError: boolean;
+}
+
+class DashboardErrorBoundary extends Component<
+  DashboardErrorBoundaryProps,
+  DashboardErrorBoundaryState
+> {
+  state: DashboardErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): DashboardErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("Dashboard render failure", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="page" style={{ maxWidth: 680 }}>
+          <Card
+            title="UI failed to render"
+            subtitle="Reload the page. If this persists, restart the local stack."
+          >
+            <p className="helper">
+              Try hard refresh and clear local storage key <code>reward-auth</code>.
+            </p>
+          </Card>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
 }

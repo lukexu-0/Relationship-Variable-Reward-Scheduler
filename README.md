@@ -18,6 +18,7 @@ Monorepo for a multi-user relationship variable reward scheduler with:
 ## Start Here
 - Local startup and test runbook: `START_APP.md`
 - Complete handoff guide for future agents: `docs/FUTURE_AGENTS.md`
+- One-command local stack startup: `corepack pnpm local:start`
 
 ## Documentation Index
 - System architecture: `docs/architecture.md`
