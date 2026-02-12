@@ -109,43 +109,43 @@ export async function createProfile(
   );
 }
 
-export async function getTemplates(accessToken: string, profileId: string) {
+export async function getEventConfigs(accessToken: string, profileId: string) {
   return request<{
-    templates: Array<{
+    eventConfigs: Array<{
       _id: string;
       name: string;
-      category: string;
+      slug: string;
       baseIntervalDays: number;
       jitterPct: number;
       enabled: boolean;
       createdAt?: string;
       updatedAt?: string;
     }>;
-  }>(`/api/v1/profiles/${profileId}/templates`, {}, accessToken);
+  }>(`/api/v1/profiles/${profileId}/event-configs`, {}, accessToken);
 }
 
-export async function createTemplate(
+export async function createEventConfig(
   accessToken: string,
   profileId: string,
   payload: {
     name: string;
-    category: string;
+    slug: string;
     baseIntervalDays: number;
     jitterPct: number;
     enabled: boolean;
   }
 ) {
   return request<{
-    template: {
+    eventConfig: {
       _id: string;
       name: string;
-      category: string;
+      slug: string;
       baseIntervalDays: number;
       jitterPct: number;
       enabled: boolean;
     };
   }>(
-    `/api/v1/profiles/${profileId}/templates`,
+    `/api/v1/profiles/${profileId}/event-configs`,
     {
       method: "POST",
       body: JSON.stringify(payload)
@@ -154,22 +154,32 @@ export async function createTemplate(
   );
 }
 
-export async function updateTemplate(
+export async function updateEventConfig(
   accessToken: string,
-  templateId: string,
+  eventConfigId: string,
   payload: Partial<{
     name: string;
-    category: string;
+    slug: string;
     baseIntervalDays: number;
     jitterPct: number;
     enabled: boolean;
   }>
 ) {
-  return request<{ template: { _id: string; name: string; category: string } }>(
-    `/api/v1/templates/${templateId}`,
+  return request<{ eventConfig: { _id: string; name: string; slug: string } }>(
+    `/api/v1/event-configs/${eventConfigId}`,
     {
       method: "PATCH",
       body: JSON.stringify(payload)
+    },
+    accessToken
+  );
+}
+
+export async function deleteEventConfig(accessToken: string, eventConfigId: string) {
+  return request<{}>(
+    `/api/v1/event-configs/${eventConfigId}`,
+    {
+      method: "DELETE"
     },
     accessToken
   );
@@ -182,6 +192,7 @@ export async function getScheduleSettings(accessToken: string, profileId: string
       reminderLeadHours: number;
       minGapHours: number;
       allowedWindows: Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>;
+      recurringBlackoutWeekdays: number[];
       blackoutDates: Array<{ startAt: string; endAt?: string; allDay?: boolean; note?: string }>;
     } | null;
   }>(`/api/v1/profiles/${profileId}/schedule-settings`, {}, accessToken);
@@ -195,6 +206,7 @@ export async function updateScheduleSettings(
     reminderLeadHours: number;
     minGapHours: number;
     allowedWindows: Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>;
+    recurringBlackoutWeekdays: number[];
     blackoutDates: Array<{ startAt: string; endAt?: string; allDay?: boolean; note?: string }>;
   }
 ) {
@@ -212,9 +224,10 @@ export async function getEvents(accessToken: string, profileId: string) {
   return request<{
     events: Array<{
       _id: string;
-      templateId: string;
+      eventConfigId: string;
       scheduledAt: string;
       originalScheduledAt: string;
+      hasExplicitTime: boolean;
       status: string;
       notes?: string;
       adjustments: Array<{
@@ -231,7 +244,7 @@ export async function getEvents(accessToken: string, profileId: string) {
 export async function createEvent(
   accessToken: string,
   profileId: string,
-  payload: { templateId: string; scheduledAt: string; notes?: string }
+  payload: { eventConfigId: string; scheduledDate: string; scheduledTime?: string; notes?: string }
 ) {
   return request<{ event: { _id: string } }>(
     `/api/v1/profiles/${profileId}/events`,
@@ -297,7 +310,7 @@ export async function applyMissedOption(
 export async function rescheduleEvent(
   accessToken: string,
   eventId: string,
-  payload: { scheduledAt: string; reason: string }
+  payload: { scheduledDate: string; scheduledTime?: string; reason: string }
 ) {
   return request<{ event: { _id: string; status: string } }>(
     `/api/v1/events/${eventId}/reschedule`,
@@ -312,7 +325,7 @@ export async function rescheduleEvent(
 export async function updateEvent(
   accessToken: string,
   eventId: string,
-  payload: { scheduledAt?: string; notes?: string; reason?: string }
+  payload: { scheduledDate?: string; scheduledTime?: string; notes?: string; reason?: string }
 ) {
   return request<{ event: { _id: string; status: string; notes?: string } }>(
     `/api/v1/events/${eventId}`,
@@ -332,4 +345,57 @@ export async function deleteEvent(accessToken: string, eventId: string) {
     },
     accessToken
   );
+}
+
+// Backward-compatible exports for older panels/tests while they migrate.
+export async function getTemplates(accessToken: string, profileId: string) {
+  const response = await getEventConfigs(accessToken, profileId);
+  return {
+    templates: response.eventConfigs.map((eventConfig) => ({
+      ...eventConfig,
+      category: eventConfig.slug
+    }))
+  };
+}
+
+export async function createTemplate(
+  accessToken: string,
+  profileId: string,
+  payload: {
+    name: string;
+    category: string;
+    baseIntervalDays: number;
+    jitterPct: number;
+    enabled: boolean;
+  }
+) {
+  const response = await createEventConfig(accessToken, profileId, {
+    name: payload.name,
+    slug: payload.category,
+    baseIntervalDays: payload.baseIntervalDays,
+    jitterPct: payload.jitterPct,
+    enabled: payload.enabled
+  });
+  return { template: { ...response.eventConfig, category: response.eventConfig.slug } };
+}
+
+export async function updateTemplate(
+  accessToken: string,
+  templateId: string,
+  payload: Partial<{
+    name: string;
+    category: string;
+    baseIntervalDays: number;
+    jitterPct: number;
+    enabled: boolean;
+  }>
+) {
+  const response = await updateEventConfig(accessToken, templateId, {
+    name: payload.name,
+    slug: payload.category,
+    baseIntervalDays: payload.baseIntervalDays,
+    jitterPct: payload.jitterPct,
+    enabled: payload.enabled
+  });
+  return { template: { ...response.eventConfig, category: response.eventConfig.slug } };
 }

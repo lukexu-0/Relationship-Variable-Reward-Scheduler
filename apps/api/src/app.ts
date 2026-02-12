@@ -8,7 +8,7 @@ import { authRouter } from "./routes/auth.routes.js";
 import { eventsRouter } from "./routes/events.routes.js";
 import { profilesRouter } from "./routes/profiles.routes.js";
 import { scheduleSettingsRouter } from "./routes/schedule-settings.routes.js";
-import { templatesRouter } from "./routes/templates.routes.js";
+import { eventConfigsRouter } from "./routes/templates.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const logger = pino({ name: "api-request" });
@@ -44,7 +44,7 @@ export function createApp() {
 
   app.use("/api/v1/auth", authRouter);
   app.use("/api/v1", profilesRouter);
-  app.use("/api/v1", templatesRouter);
+  app.use("/api/v1", eventConfigsRouter);
   app.use("/api/v1", scheduleSettingsRouter);
   app.use("/api/v1", eventsRouter);
 

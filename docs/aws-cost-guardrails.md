@@ -79,6 +79,14 @@ Repeat for all repos.
 - Track reminder count daily from `email_logs`.
 - Alert when daily send volume exceeds expected threshold.
 
+## 5.1 Schedule-generation queue volume controls
+- Event/profile/settings/config mutations enqueue immediate `schedule-generation` jobs.
+- Profile refresh jobs are deduped by `profile-refresh:<profileId>` to reduce duplicate queue growth.
+- Monitor Redis/BullMQ queue depth and worker processing lag.
+- Alert when queue depth or retry count grows unexpectedly (symptom of scheduler/worker issues).
+- Track spikes from event-heavy write paths (event edit/delete/complete/miss + config/settings saves).
+- In cost incidents, scale worker down before API/web only if delayed event generation is acceptable.
+
 ## 6. Networking cost controls
 - Prefer one AZ in dev.
 - Keep ALB off in dev except active test windows.
@@ -98,7 +106,7 @@ Monthly:
 1. Execute dependency update workflow.
 2. Prune ECR images.
 3. Review Atlas/ElastiCache sizing against actual usage.
-4. If category-set migration is run, execute during low-traffic windows to avoid peak write bursts.
+4. If event-config normalization migration is run, execute during low-traffic windows to avoid peak write bursts.
 
 ## 8. Emergency actions if spend spikes
 1. Scale deployments to zero in dev immediately:

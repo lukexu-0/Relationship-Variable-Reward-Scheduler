@@ -122,6 +122,7 @@ describe("feature panels integration", () => {
           reminderLeadHours: 24,
           minGapHours: 24,
           allowedWindows: [{ weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" }],
+          recurringBlackoutWeekdays: [],
           blackoutDates: []
         }}
         onSave={onSave}

@@ -109,18 +109,20 @@ bash tools/local/run-local.sh --skip-docker --skip-sync
 
 Ctrl+C stops all started services.
 
-## 5.1 One-time category-set normalization (existing databases)
-Run this once when upgrading an existing database to the category-set model.
+## 5.1 One-time event-config normalization (existing databases)
+Run this once when upgrading an existing database to the event-config model.
 
 ```bash
 cd /Users/lukexu/cs-projects/Relationship-Variable-Reward-Scheduler
-corepack pnpm --filter @reward/api exec tsx ../../tools/migrations/normalize-category-sets.ts
+corepack pnpm --filter @reward/api exec tsx ../../tools/migrations/normalize-event-configs.ts
 ```
 
 What it does:
-- keeps the newest template per `(profile, category)` and removes older duplicates
-- reassigns events from removed templates to the kept template
-- keeps the earliest active upcoming event per category and removes extra future duplicates
+- backfills/normalizes event config slugs per profile
+- deduplicates conflicting event configs and reassigns linked events
+- enforces one active upcoming event per event config
+- backfills `hasExplicitTime=false` for historical events
+- backfills `recurringBlackoutWeekdays=[]` where missing
 
 ## 6. Smoke-check locally
 ```bash
@@ -133,19 +135,31 @@ Open:
 
 Minimum manual flow:
 1. Register user.
-2. Create profile.
-3. Confirm default templates are present.
-4. Create event.
-5. Mark missed.
-6. Load missed options.
-7. Apply option.
-8. Verify event shows adjustment history.
+2. In `Profiles`, expand `New profile` and create a profile.
+3. Confirm default event configs are present in the left `Events` list.
+4. Open `Event Builder`, then create/edit/delete an event.
+5. Verify upcoming-event row delete works directly from the trash button (no confirm prompt).
+6. Mark an event missed and load/apply missed options.
+7. Verify adjustment history and calendar day highlighting update.
+8. Open `Schedule Settings` from calendar top-right and save allowed-window/blackout changes.
 
 ## 7. Run full pre-deploy validation
 ```bash
 cd /Users/lukexu/cs-projects/Relationship-Variable-Reward-Scheduler
 corepack pnpm -r build
 corepack pnpm -r test
+```
+
+Web e2e workflows (requires local stack running, including API; worker required for auto-generation checks):
+```bash
+cd /Users/lukexu/cs-projects/Relationship-Variable-Reward-Scheduler
+corepack pnpm --filter @reward/web exec playwright install chromium
+corepack pnpm --filter @reward/web test:e2e
+```
+
+If web is running on a non-default Vite port, set:
+```bash
+E2E_BASE_URL=http://localhost:5174 corepack pnpm --filter @reward/web test:e2e
 ```
 
 Python scheduler coverage gate:
@@ -192,3 +206,7 @@ brew services stop redis
 - No AWS credentials locally:
   - API/web/scheduler still run
   - worker email delivery is optional for local testing
+- Dashboard shows `UI failed to render`:
+  - hard refresh
+  - clear local storage key `reward-auth`
+  - restart local stack

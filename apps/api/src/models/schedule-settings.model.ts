@@ -26,6 +26,7 @@ const scheduleSettingsSchema = new Schema(
     reminderLeadHours: { type: Number, required: true, default: 24, min: 1, max: 168 },
     minGapHours: { type: Number, required: true, default: 24, min: 1, max: 720 },
     allowedWindows: { type: [allowedWindowSchema], default: [] },
+    recurringBlackoutWeekdays: { type: [Number], default: [] },
     blackoutDates: { type: [blackoutDateSchema], default: [] }
   },
   { timestamps: true, collection: "schedule_settings" }

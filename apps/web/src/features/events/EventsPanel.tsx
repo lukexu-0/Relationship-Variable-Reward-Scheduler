@@ -44,8 +44,9 @@ export function EventsPanel({ accessToken, profileId, onPickMissedEvent }: Event
   const createEventMutation = useMutation({
     mutationFn: () =>
       createEvent(accessToken, profileId as string, {
-        templateId,
-        scheduledAt: localDateTimeToIso(scheduledAt),
+        eventConfigId: templateId,
+        scheduledDate: scheduledAt.slice(0, 10),
+        scheduledTime: scheduledAt.slice(11, 16) || undefined,
         notes: notes || undefined
       }),
     onSuccess: async () => {
@@ -74,7 +75,8 @@ export function EventsPanel({ accessToken, profileId, onPickMissedEvent }: Event
   const rescheduleMutation = useMutation({
     mutationFn: ({ eventId, nextAt }: { eventId: string; nextAt: string }) =>
       rescheduleEvent(accessToken, eventId, {
-        scheduledAt: nextAt,
+        scheduledDate: nextAt.slice(0, 10),
+        scheduledTime: nextAt.slice(11, 16) || undefined,
         reason: rescheduleReason
       }),
     onSuccess: async () => {
@@ -156,7 +158,9 @@ export function EventsPanel({ accessToken, profileId, onPickMissedEvent }: Event
                     <div>
                       <strong>{formatIsoToLocal(event.scheduledAt)}</strong>
                     </div>
-                    <div className="helper">Template: {templateNameById.get(event.templateId) ?? event.templateId}</div>
+                    <div className="helper">
+                      Template: {templateNameById.get(event.eventConfigId) ?? event.eventConfigId}
+                    </div>
                     <div className="helper">Original: {formatIsoToLocal(event.originalScheduledAt)}</div>
                   </div>
                   <Badge>{event.status}</Badge>

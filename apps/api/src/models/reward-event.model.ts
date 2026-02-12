@@ -14,9 +14,12 @@ const eventAdjustmentSchema = new Schema(
 const rewardEventSchema = new Schema(
   {
     profileId: { type: Schema.Types.ObjectId, ref: "Profile", required: true, index: true },
-    templateId: { type: Schema.Types.ObjectId, ref: "RewardTemplate", required: true, index: true },
+    eventConfigId: { type: Schema.Types.ObjectId, ref: "RewardEventConfig", index: true },
+    // Deprecated field kept while migration backfills eventConfigId.
+    templateId: { type: Schema.Types.ObjectId, ref: "RewardTemplate", index: true },
     scheduledAt: { type: Date, required: true, index: true },
     originalScheduledAt: { type: Date, required: true },
+    hasExplicitTime: { type: Boolean, required: true, default: false },
     status: {
       type: String,
       required: true,

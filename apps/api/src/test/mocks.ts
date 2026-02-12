@@ -2,6 +2,7 @@ import { vi } from "vitest";
 
 export const queueReminderMock = vi.fn(async () => undefined);
 export const removeReminderJobsForEventMock = vi.fn(async () => undefined);
+export const enqueueProfileScheduleGenerationMock = vi.fn(async () => undefined);
 export const getMissedOptionsMock = vi.fn(async () => [
   {
     optionId: "option-asap",
@@ -34,4 +35,9 @@ vi.mock("../services/scheduler-client.js", () => ({
   getMissedOptions: getMissedOptionsMock,
   recommendNextSchedule: vi.fn(),
   recomputeSchedulerState: recomputeSchedulerStateMock
+}));
+
+vi.mock("../services/schedule-generation-queue.js", () => ({
+  enqueueProfileScheduleGeneration: enqueueProfileScheduleGenerationMock,
+  closeScheduleGenerationQueue: vi.fn(async () => undefined)
 }));

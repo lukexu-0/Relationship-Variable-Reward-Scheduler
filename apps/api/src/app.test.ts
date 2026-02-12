@@ -6,7 +6,12 @@ import "./test/setup.js";
 import "./test/mocks.js";
 
 import { createApp } from "./app.js";
-import { queueReminderMock, removeReminderJobsForEventMock, recomputeSchedulerStateMock } from "./test/mocks.js";
+import {
+  enqueueProfileScheduleGenerationMock,
+  queueReminderMock,
+  removeReminderJobsForEventMock,
+  recomputeSchedulerStateMock
+} from "./test/mocks.js";
 
 const app = createApp();
 
@@ -15,6 +20,7 @@ describe("API end-to-end", () => {
     queueReminderMock.mockClear();
     removeReminderJobsForEventMock.mockClear();
     recomputeSchedulerStateMock.mockClear();
+    enqueueProfileScheduleGenerationMock.mockClear();
   });
 
   it("responds to health endpoint", async () => {
@@ -96,7 +102,7 @@ describe("API end-to-end", () => {
     expect(login.status).toBe(401);
   });
 
-  it("creates and lists profiles with default templates", async () => {
+  it("creates and lists profiles with default event configs", async () => {
     const auth = await registerAndLogin("profiles@example.com");
 
     const created = await request(app)
@@ -115,12 +121,12 @@ describe("API end-to-end", () => {
     expect(profiles.body.profiles).toHaveLength(1);
 
     const profileId = created.body.profile._id as string;
-    const templates = await request(app)
-      .get(`/api/v1/profiles/${profileId}/templates`)
+    const eventConfigs = await request(app)
+      .get(`/api/v1/profiles/${profileId}/event-configs`)
       .set("authorization", `Bearer ${auth.accessToken}`);
 
-    expect(templates.status).toBe(200);
-    expect(templates.body.templates.length).toBeGreaterThanOrEqual(4);
+    expect(eventConfigs.status).toBe(200);
+    expect(eventConfigs.body.eventConfigs.length).toBeGreaterThanOrEqual(4);
 
     const settings = await request(app)
       .get(`/api/v1/profiles/${profileId}/schedule-settings`)
@@ -130,44 +136,75 @@ describe("API end-to-end", () => {
     expect(settings.body.settings.timezone).toBe("UTC");
   });
 
-  it("supports custom template create and update", async () => {
+  it("supports custom event config create and update", async () => {
     const auth = await registerAndLogin("template@example.com");
     const profile = await createProfile(auth.accessToken, "TemplateProfile");
 
-    const createTemplate = await request(app)
-      .post(`/api/v1/profiles/${profile.id}/templates`)
+    const createEventConfig = await request(app)
+      .post(`/api/v1/profiles/${profile.id}/event-configs`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        name: "surprise_gift",
-        category: "surprise",
+        name: "surprise gift",
+        slug: "surprise-gift",
         baseIntervalDays: 9,
         jitterPct: 0.25,
         enabled: true
       });
 
-    expect(createTemplate.status).toBe(201);
+    expect(createEventConfig.status).toBe(201);
 
-    const templateId = createTemplate.body.template._id as string;
-    const updateTemplate = await request(app)
-      .patch(`/api/v1/templates/${templateId}`)
+    const eventConfigId = createEventConfig.body.eventConfig._id as string;
+    const updateEventConfig = await request(app)
+      .patch(`/api/v1/event-configs/${eventConfigId}`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({ baseIntervalDays: 12, enabled: false });
 
-    expect(updateTemplate.status).toBe(200);
-    expect(updateTemplate.body.template.baseIntervalDays).toBe(12);
-    expect(updateTemplate.body.template.enabled).toBe(false);
+    expect(updateEventConfig.status).toBe(200);
+    expect(updateEventConfig.body.eventConfig.baseIntervalDays).toBe(12);
+    expect(updateEventConfig.body.eventConfig.enabled).toBe(false);
   });
 
-  it("returns 404 for missing template updates", async () => {
-    const auth = await registerAndLogin("template-missing@example.com");
+  it("returns 404 for missing event config updates", async () => {
+    const auth = await registerAndLogin("event-config-missing@example.com");
     const missingId = new mongoose.Types.ObjectId().toString();
 
-    const updateTemplate = await request(app)
-      .patch(`/api/v1/templates/${missingId}`)
+    const updateEventConfig = await request(app)
+      .patch(`/api/v1/event-configs/${missingId}`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({ baseIntervalDays: 12 });
 
-    expect(updateTemplate.status).toBe(404);
+    expect(updateEventConfig.status).toBe(404);
+  });
+
+  it("updates event config jitter and returns 404 for missing event config delete", async () => {
+    const auth = await registerAndLogin("event-config-jitter-delete@example.com");
+    const profile = await createProfile(auth.accessToken, "EventConfigJitterDeleteProfile");
+
+    const created = await request(app)
+      .post(`/api/v1/profiles/${profile.id}/event-configs`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        name: "jitter candidate",
+        slug: "jitter-candidate",
+        baseIntervalDays: 9,
+        jitterPct: 0.15,
+        enabled: true
+      });
+    expect(created.status).toBe(201);
+
+    const eventConfigId = created.body.eventConfig._id as string;
+    const updated = await request(app)
+      .patch(`/api/v1/event-configs/${eventConfigId}`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({ jitterPct: 0.35 });
+    expect(updated.status).toBe(200);
+    expect(updated.body.eventConfig.jitterPct).toBe(0.35);
+
+    const missingId = new mongoose.Types.ObjectId().toString();
+    const missingDelete = await request(app)
+      .delete(`/api/v1/event-configs/${missingId}`)
+      .set("authorization", `Bearer ${auth.accessToken}`);
+    expect(missingDelete.status).toBe(404);
   });
 
   it("updates schedule settings", async () => {
@@ -182,6 +219,7 @@ describe("API end-to-end", () => {
         reminderLeadHours: 12,
         minGapHours: 36,
         allowedWindows: [{ weekday: 2, startLocalTime: "17:00", endLocalTime: "20:00" }],
+        recurringBlackoutWeekdays: [0],
         blackoutDates: [{ startAt: new Date("2026-02-14T00:00:00.000Z").toISOString(), allDay: true }]
       });
 
@@ -208,14 +246,16 @@ describe("API end-to-end", () => {
   it("handles event create/list/complete/miss/options/apply/reschedule", async () => {
     const auth = await registerAndLogin("events@example.com");
     const profile = await createProfile(auth.accessToken, "EventsProfile");
-    const templateId = await getTemplateId(auth.accessToken, profile.id);
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
+    const scheduledSoon = toDateAndTime(Date.now() + 48 * 60 * 60 * 1000);
 
     const createEvent = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId,
-        scheduledAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+        eventConfigId,
+        scheduledDate: scheduledSoon.scheduledDate,
+        scheduledTime: scheduledSoon.scheduledTime,
         notes: "Bring flowers"
       });
 
@@ -263,7 +303,7 @@ describe("API end-to-end", () => {
       .patch(`/api/v1/events/${eventId}/reschedule`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        scheduledAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+        ...toDateAndTime(Date.now() + 72 * 60 * 60 * 1000),
         reason: "Manual adjustment"
       });
     expect(manual.status).toBe(200);
@@ -273,15 +313,15 @@ describe("API end-to-end", () => {
   it("supports event patch edits and hard delete", async () => {
     const auth = await registerAndLogin("event-edit-delete@example.com");
     const profile = await createProfile(auth.accessToken, "EditDeleteProfile");
-    const templateId = await getTemplateId(auth.accessToken, profile.id);
-    const initialScheduledAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
+    const initialScheduled = toDateAndTime(Date.now() + 24 * 60 * 60 * 1000);
 
     const create = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId,
-        scheduledAt: initialScheduledAt,
+        eventConfigId,
+        ...initialScheduled,
         notes: "Initial note"
       });
     expect(create.status).toBe(201);
@@ -297,16 +337,14 @@ describe("API end-to-end", () => {
     const missingReason = await request(app)
       .patch(`/api/v1/events/${eventId}`)
       .set("authorization", `Bearer ${auth.accessToken}`)
-      .send({
-        scheduledAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
-      });
+      .send(toDateAndTime(Date.now() + 48 * 60 * 60 * 1000));
     expect(missingReason.status).toBe(400);
 
     const withReason = await request(app)
       .patch(`/api/v1/events/${eventId}`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        scheduledAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+        ...toDateAndTime(Date.now() + 72 * 60 * 60 * 1000),
         reason: "Move it out",
         notes: "Moved"
       });
@@ -326,40 +364,177 @@ describe("API end-to-end", () => {
     expect(list.body.events).toHaveLength(0);
   });
 
-  it("returns 409 when creating a second active upcoming event for the same category", async () => {
-    const auth = await registerAndLogin("event-category-conflict@example.com");
+  it("supports date-only creation and schedule time-only edits", async () => {
+    const auth = await registerAndLogin("event-date-only@example.com");
+    const profile = await createProfile(auth.accessToken, "DateOnlyProfile");
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
+    const target = Date.now() + 48 * 60 * 60 * 1000;
+    const targetDate = toDateOnly(target);
+
+    const settingsUpdate = await request(app)
+      .put(`/api/v1/profiles/${profile.id}/schedule-settings`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        timezone: "Not/A_Real_Timezone",
+        reminderLeadHours: 6,
+        minGapHours: 24,
+        allowedWindows: [
+          { weekday: 0, startLocalTime: "08:15", endLocalTime: "22:00" },
+          { weekday: 1, startLocalTime: "08:15", endLocalTime: "22:00" },
+          { weekday: 2, startLocalTime: "08:15", endLocalTime: "22:00" },
+          { weekday: 3, startLocalTime: "08:15", endLocalTime: "22:00" },
+          { weekday: 4, startLocalTime: "08:15", endLocalTime: "22:00" },
+          { weekday: 5, startLocalTime: "08:15", endLocalTime: "22:00" },
+          { weekday: 6, startLocalTime: "08:15", endLocalTime: "22:00" }
+        ],
+        recurringBlackoutWeekdays: [],
+        blackoutDates: []
+      });
+    expect(settingsUpdate.status).toBe(200);
+
+    const create = await request(app)
+      .post(`/api/v1/profiles/${profile.id}/events`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        eventConfigId,
+        scheduledDate: targetDate,
+        notes: "No explicit time"
+      });
+    expect(create.status).toBe(201);
+    expect(create.body.event.hasExplicitTime).toBe(false);
+
+    const eventId = create.body.event._id as string;
+    const patchTimeOnly = await request(app)
+      .patch(`/api/v1/events/${eventId}`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        scheduledTime: "11:45",
+        reason: "Add exact time"
+      });
+    expect(patchTimeOnly.status).toBe(200);
+    expect(patchTimeOnly.body.event.hasExplicitTime).toBe(true);
+    expect(patchTimeOnly.body.event.adjustments.length).toBeGreaterThan(0);
+  });
+
+  it("updates derived slug when patching event config name and deletes event configs", async () => {
+    const auth = await registerAndLogin("event-config-patch-delete@example.com");
+    const profile = await createProfile(auth.accessToken, "ConfigPatchDeleteProfile");
+
+    const created = await request(app)
+      .post(`/api/v1/profiles/${profile.id}/event-configs`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        name: "Custom Plan",
+        slug: "custom-plan",
+        baseIntervalDays: 8,
+        jitterPct: 0.2,
+        enabled: true
+      });
+    expect(created.status).toBe(201);
+    const eventConfigId = created.body.eventConfig._id as string;
+
+    const renamed = await request(app)
+      .patch(`/api/v1/event-configs/${eventConfigId}`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({ name: "Weekly Ritual" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.eventConfig.slug).toBe("weekly-ritual");
+
+    const eventCreated = await request(app)
+      .post(`/api/v1/profiles/${profile.id}/events`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        eventConfigId,
+        ...toDateAndTime(Date.now() + 24 * 60 * 60 * 1000)
+      });
+    expect(eventCreated.status).toBe(201);
+
+    const deleted = await request(app)
+      .delete(`/api/v1/event-configs/${eventConfigId}`)
+      .set("authorization", `Bearer ${auth.accessToken}`);
+    expect(deleted.status).toBe(204);
+
+    const listConfigs = await request(app)
+      .get(`/api/v1/profiles/${profile.id}/event-configs`)
+      .set("authorization", `Bearer ${auth.accessToken}`);
+    expect(listConfigs.status).toBe(200);
+    expect(listConfigs.body.eventConfigs.find((config: { _id: string }) => config._id === eventConfigId)).toBeFalsy();
+
+    const listEvents = await request(app)
+      .get(`/api/v1/profiles/${profile.id}/events`)
+      .set("authorization", `Bearer ${auth.accessToken}`);
+    expect(listEvents.status).toBe(200);
+    expect(listEvents.body.events.find((event: { eventConfigId?: string }) => event.eventConfigId === eventConfigId)).toBeFalsy();
+  });
+
+  it("does not queue reminders when schedule changes on non-upcoming statuses", async () => {
+    const auth = await registerAndLogin("event-completed-edit@example.com");
+    const profile = await createProfile(auth.accessToken, "CompletedEditProfile");
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
+
+    const createEvent = await request(app)
+      .post(`/api/v1/profiles/${profile.id}/events`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        eventConfigId,
+        ...toDateAndTime(Date.now() + 24 * 60 * 60 * 1000)
+      });
+    expect(createEvent.status).toBe(201);
+    const eventId = createEvent.body.event._id as string;
+
+    const complete = await request(app)
+      .patch(`/api/v1/events/${eventId}/complete`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({ sentimentLevel: "WELL" });
+    expect(complete.status).toBe(200);
+
+    queueReminderMock.mockClear();
+
+    const changeSchedule = await request(app)
+      .patch(`/api/v1/events/${eventId}`)
+      .set("authorization", `Bearer ${auth.accessToken}`)
+      .send({
+        ...toDateAndTime(Date.now() + 48 * 60 * 60 * 1000),
+        reason: "Administrative correction"
+      });
+    expect(changeSchedule.status).toBe(200);
+    expect(queueReminderMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when creating a second active upcoming event for the same event config", async () => {
+    const auth = await registerAndLogin("event-config-conflict@example.com");
     const profile = await createProfile(auth.accessToken, "EventConflictProfile");
-    const templateId = await getTemplateId(auth.accessToken, profile.id);
-    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
+    const soon = toDateAndTime(Date.now() + 24 * 60 * 60 * 1000);
 
     const first = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
-      .send({ templateId, scheduledAt: soon });
+      .send({ eventConfigId, ...soon });
     expect(first.status).toBe(201);
 
     const second = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId,
-        scheduledAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString()
+        eventConfigId,
+        ...toDateAndTime(Date.now() + 72 * 60 * 60 * 1000)
       });
     expect(second.status).toBe(409);
-    expect(second.body.error.details.code).toBe("CATEGORY_UPCOMING_EXISTS");
+    expect(second.body.error.details.code).toBe("EVENT_CONFIG_UPCOMING_EXISTS");
   });
 
-  it("returns 409 when applying missed options would violate category upcoming uniqueness", async () => {
+  it("returns 409 when applying missed options would violate event-config upcoming uniqueness", async () => {
     const auth = await registerAndLogin("event-missed-conflict@example.com");
     const profile = await createProfile(auth.accessToken, "MissedConflictProfile");
-    const templateId = await getTemplateId(auth.accessToken, profile.id);
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
 
     const createUpcoming = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId,
-        scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        eventConfigId,
+        ...toDateAndTime(Date.now() + 24 * 60 * 60 * 1000)
       });
     expect(createUpcoming.status).toBe(201);
 
@@ -367,8 +542,8 @@ describe("API end-to-end", () => {
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId,
-        scheduledAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        eventConfigId,
+        ...toDateAndTime(Date.now() - 24 * 60 * 60 * 1000)
       });
     expect(createPast.status).toBe(201);
     const pastEventId = createPast.body.event._id as string;
@@ -384,32 +559,32 @@ describe("API end-to-end", () => {
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({ reason: "Try ASAP" });
     expect(apply.status).toBe(409);
-    expect(apply.body.error.details.code).toBe("CATEGORY_UPCOMING_EXISTS");
+    expect(apply.body.error.details.code).toBe("EVENT_CONFIG_UPCOMING_EXISTS");
   });
 
-  it("returns 409 when creating or patching templates with duplicate categories", async () => {
-    const auth = await registerAndLogin("template-category-conflict@example.com");
-    const profile = await createProfile(auth.accessToken, "TemplateConflictProfile");
+  it("returns 409 when creating or patching event configs with duplicate slugs", async () => {
+    const auth = await registerAndLogin("event-config-slug-conflict@example.com");
+    const profile = await createProfile(auth.accessToken, "EventConfigConflictProfile");
 
     const duplicateCreate = await request(app)
-      .post(`/api/v1/profiles/${profile.id}/templates`)
+      .post(`/api/v1/profiles/${profile.id}/event-configs`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        name: "gift_duplicate",
-        category: "gift",
+        name: "gift duplicate",
+        slug: "flowers",
         baseIntervalDays: 12,
         jitterPct: 0.2,
         enabled: true
       });
     expect(duplicateCreate.status).toBe(409);
-    expect(duplicateCreate.body.error.details.code).toBe("TEMPLATE_CATEGORY_EXISTS");
+    expect(duplicateCreate.body.error.details.code).toBe("EVENT_CONFIG_SLUG_EXISTS");
 
     const created = await request(app)
-      .post(`/api/v1/profiles/${profile.id}/templates`)
+      .post(`/api/v1/profiles/${profile.id}/event-configs`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        name: "weekend_trip",
-        category: "trip",
+        name: "weekend trip",
+        slug: "trip",
         baseIntervalDays: 12,
         jitterPct: 0.2,
         enabled: true
@@ -417,24 +592,24 @@ describe("API end-to-end", () => {
     expect(created.status).toBe(201);
 
     const patchDuplicate = await request(app)
-      .patch(`/api/v1/templates/${created.body.template._id as string}`)
+      .patch(`/api/v1/event-configs/${created.body.eventConfig._id as string}`)
       .set("authorization", `Bearer ${auth.accessToken}`)
-      .send({ category: "gift" });
+      .send({ slug: "flowers" });
     expect(patchDuplicate.status).toBe(409);
-    expect(patchDuplicate.body.error.details.code).toBe("TEMPLATE_CATEGORY_EXISTS");
+    expect(patchDuplicate.body.error.details.code).toBe("EVENT_CONFIG_SLUG_EXISTS");
   });
 
-  it("returns 404 when creating event with missing template", async () => {
-    const auth = await registerAndLogin("event-missing-template@example.com");
-    const profile = await createProfile(auth.accessToken, "EventsMissingTemplate");
-    const missingTemplateId = new mongoose.Types.ObjectId().toString();
+  it("returns 404 when creating event with missing event config", async () => {
+    const auth = await registerAndLogin("event-missing-config@example.com");
+    const profile = await createProfile(auth.accessToken, "EventsMissingConfig");
+    const missingEventConfigId = new mongoose.Types.ObjectId().toString();
 
     const create = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId: missingTemplateId,
-        scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        eventConfigId: missingEventConfigId,
+        ...toDateAndTime(Date.now() + 24 * 60 * 60 * 1000)
       });
 
     expect(create.status).toBe(404);
@@ -458,7 +633,7 @@ describe("API end-to-end", () => {
     const profileA = await createProfile(userA.accessToken, "PrivateProfile");
 
     const forbidden = await request(app)
-      .get(`/api/v1/profiles/${profileA.id}/templates`)
+      .get(`/api/v1/profiles/${profileA.id}/event-configs`)
       .set("authorization", `Bearer ${userB.accessToken}`);
 
     expect(forbidden.status).toBe(404);
@@ -480,14 +655,14 @@ describe("API end-to-end", () => {
   it("returns 404 when missed option id is unknown", async () => {
     const auth = await registerAndLogin("missing-option@example.com");
     const profile = await createProfile(auth.accessToken, "OptionProfile");
-    const templateId = await getTemplateId(auth.accessToken, profile.id);
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
 
     const event = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId,
-        scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        eventConfigId,
+        ...toDateAndTime(Date.now() + 24 * 60 * 60 * 1000)
       });
 
     const eventId = event.body.event._id as string;
@@ -509,14 +684,14 @@ describe("API end-to-end", () => {
   it("rejects missed options access for non-missed events", async () => {
     const auth = await registerAndLogin("missed-state-guard@example.com");
     const profile = await createProfile(auth.accessToken, "GuardProfile");
-    const templateId = await getTemplateId(auth.accessToken, profile.id);
+    const eventConfigId = await getEventConfigId(auth.accessToken, profile.id);
 
     const event = await request(app)
       .post(`/api/v1/profiles/${profile.id}/events`)
       .set("authorization", `Bearer ${auth.accessToken}`)
       .send({
-        templateId,
-        scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        eventConfigId,
+        ...toDateAndTime(Date.now() + 24 * 60 * 60 * 1000)
       });
     const eventId = event.body.event._id as string;
 
@@ -573,10 +748,31 @@ async function createProfile(
   return { id: profile.body.profile._id as string };
 }
 
-async function getTemplateId(accessToken: string, profileId: string): Promise<string> {
-  const templates = await request(app)
-    .get(`/api/v1/profiles/${profileId}/templates`)
+async function getEventConfigId(accessToken: string, profileId: string): Promise<string> {
+  const eventConfigs = await request(app)
+    .get(`/api/v1/profiles/${profileId}/event-configs`)
     .set("authorization", `Bearer ${accessToken}`);
 
-  return templates.body.templates[0]._id as string;
+  return eventConfigs.body.eventConfigs[0]._id as string;
+}
+
+function toDateAndTime(timestampMs: number): { scheduledDate: string; scheduledTime: string } {
+  const value = new Date(timestampMs);
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  const hours = String(value.getUTCHours()).padStart(2, "0");
+  const minutes = String(value.getUTCMinutes()).padStart(2, "0");
+  return {
+    scheduledDate: `${year}-${month}-${day}`,
+    scheduledTime: `${hours}:${minutes}`
+  };
+}
+
+function toDateOnly(timestampMs: number): string {
+  const value = new Date(timestampMs);
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

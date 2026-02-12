@@ -22,13 +22,14 @@ export interface SchedulerSettingsPayload {
   timezone: string;
   minGapHours: number;
   allowedWindows: Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>;
+  recurringBlackoutWeekdays: number[];
   blackoutDates: Array<{ startAt: string; endAt?: string; allDay?: boolean; note?: string }>;
 }
 
 export interface RecommendNextRequest {
   seed: string;
   now: string;
-  template: SchedulerTemplatePayload;
+  eventConfig: SchedulerTemplatePayload;
   settings: SchedulerSettingsPayload;
   eventHistory: SchedulerEventHistoryPayload[];
 }
@@ -43,7 +44,7 @@ export interface MissedOptionsRequest {
   now: string;
   eventId: string;
   currentScheduledAt: string;
-  template: SchedulerTemplatePayload;
+  eventConfig: SchedulerTemplatePayload;
   settings: SchedulerSettingsPayload;
   eventHistory: SchedulerEventHistoryPayload[];
 }
@@ -51,8 +52,8 @@ export interface MissedOptionsRequest {
 interface SchedulerRecomputeRequest {
   profileId: string;
   now: string;
-  templateSignals: Array<{
-    templateId: string;
+  eventConfigSignals: Array<{
+    eventConfigId: string;
     sentimentLevel?: SentimentLevel;
     status: string;
     completedAt?: string;
@@ -91,3 +92,6 @@ export async function getMissedOptions(payload: MissedOptionsRequest): Promise<M
 export async function recomputeSchedulerState(payload: SchedulerRecomputeRequest): Promise<void> {
   await postJson<{ ok: true }>("/v1/scheduler/recompute-state", payload);
 }
+
+// Backward-compatible type aliases for in-flight imports.
+export type SchedulerEventConfigPayload = SchedulerTemplatePayload;

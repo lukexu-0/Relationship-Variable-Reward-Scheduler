@@ -17,13 +17,14 @@ interface EventRecord {
   notes?: string;
   scheduledAt: string;
   originalScheduledAt: string;
-  templateName: string;
+  hasExplicitTime: boolean;
+  eventConfigName: string;
   adjustments: EventAdjustment[];
 }
 
 interface EventEditorProps {
   event: EventRecord | null;
-  onSave: (payload: { scheduledAt?: string; notes?: string; reason?: string }) => void;
+  onSave: (payload: { scheduledDate?: string; scheduledTime?: string; notes?: string; reason?: string }) => void;
   onDelete: () => void;
   onComplete: () => void;
   onMiss: () => void;
@@ -42,18 +43,24 @@ export function EventEditor({
   saving,
   deleting
 }: EventEditorProps) {
-  const [scheduledAtInput, setScheduledAtInput] = useState("");
+  const [scheduledDateInput, setScheduledDateInput] = useState("");
+  const [includeTime, setIncludeTime] = useState(false);
+  const [scheduledTimeInput, setScheduledTimeInput] = useState("09:00");
   const [notesInput, setNotesInput] = useState("");
   const [reason, setReason] = useState("Adjusted by user");
 
   useEffect(() => {
     if (!event) {
-      setScheduledAtInput("");
+      setScheduledDateInput("");
+      setScheduledTimeInput("09:00");
+      setIncludeTime(false);
       setNotesInput("");
       return;
     }
 
-    setScheduledAtInput(isoToLocalDateTime(event.scheduledAt));
+    setScheduledDateInput(isoToLocalDate(event.scheduledAt));
+    setScheduledTimeInput(isoToLocalTime(event.scheduledAt));
+    setIncludeTime(event.hasExplicitTime);
     setNotesInput(event.notes ?? "");
   }, [event]);
 
@@ -61,25 +68,63 @@ export function EventEditor({
     return <p className="helper">Select an event to edit or delete.</p>;
   }
 
-  const scheduledChanged = localDateTimeToIso(scheduledAtInput) !== event.scheduledAt;
+  const originalDate = isoToLocalDate(event.scheduledAt);
+  const originalTime = isoToLocalTime(event.scheduledAt);
+  const scheduledChanged =
+    scheduledDateInput !== originalDate ||
+    includeTime !== event.hasExplicitTime ||
+    (includeTime && scheduledTimeInput !== originalTime);
+
+  const savePayload = {
+    notes: notesInput,
+    scheduledDate: scheduledDateInput,
+    scheduledTime: includeTime ? scheduledTimeInput : undefined,
+    reason: scheduledChanged ? reason : undefined
+  };
 
   return (
     <div className="event-editor">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <strong>{event.templateName}</strong>
-          <p className="helper">Original: {formatIsoToLocal(event.originalScheduledAt)}</p>
+          <strong>{event.eventConfigName}</strong>
+          <p className="helper">Original: {formatIsoToLocal(event.originalScheduledAt, event.hasExplicitTime)}</p>
         </div>
         <Badge variant="accent">{event.status}</Badge>
       </div>
 
-      <label htmlFor="eventEditorScheduledAt">Scheduled date/time</label>
+      <label htmlFor="eventEditorScheduledDate">Scheduled date</label>
       <input
-        id="eventEditorScheduledAt"
-        type="datetime-local"
-        value={scheduledAtInput}
-        onChange={(eventChange) => setScheduledAtInput(eventChange.target.value)}
+        id="eventEditorScheduledDate"
+        type="date"
+        value={scheduledDateInput}
+        onChange={(eventChange) => setScheduledDateInput(eventChange.target.value)}
       />
+
+      <label htmlFor="eventEditorUseTime" style={{ marginTop: 8 }}>
+        Include time
+      </label>
+      <select
+        id="eventEditorUseTime"
+        value={includeTime ? "yes" : "no"}
+        onChange={(eventChange) => setIncludeTime(eventChange.target.value === "yes")}
+      >
+        <option value="no">No (date only)</option>
+        <option value="yes">Yes</option>
+      </select>
+
+      {includeTime ? (
+        <>
+          <label htmlFor="eventEditorScheduledTime" style={{ marginTop: 8 }}>
+            Scheduled time
+          </label>
+          <input
+            id="eventEditorScheduledTime"
+            type="time"
+            value={scheduledTimeInput}
+            onChange={(eventChange) => setScheduledTimeInput(eventChange.target.value)}
+          />
+        </>
+      ) : null}
 
       <label htmlFor="eventEditorNotes" style={{ marginTop: 8 }}>
         Notes
@@ -100,17 +145,7 @@ export function EventEditor({
       />
 
       <div className="row" style={{ marginTop: 10 }}>
-        <Button
-          variant="primary"
-          disabled={saving}
-          onClick={() =>
-            onSave({
-              notes: notesInput,
-              scheduledAt: scheduledAtInput ? localDateTimeToIso(scheduledAtInput) : undefined,
-              reason: scheduledChanged ? reason : undefined
-            })
-          }
-        >
+        <Button variant="primary" disabled={saving} onClick={() => onSave(savePayload)}>
           Save event
         </Button>
         <Button variant="danger" disabled={deleting} onClick={onDelete}>
@@ -144,21 +179,22 @@ export function EventEditor({
   );
 }
 
-function isoToLocalDateTime(value: string): string {
+function isoToLocalDate(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return "";
   }
 
   const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60 * 1000);
-  return local.toISOString().slice(0, 16);
+  return local.toISOString().slice(0, 10);
 }
 
-function localDateTimeToIso(value: string): string {
+function isoToLocalTime(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return value;
+    return "09:00";
   }
 
-  return parsed.toISOString();
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60 * 1000);
+  return local.toISOString().slice(11, 16);
 }

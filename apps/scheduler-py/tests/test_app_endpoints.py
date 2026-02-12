@@ -17,8 +17,8 @@ def test_recommend_next_is_deterministic_for_same_input() -> None:
     payload = {
         "seed": "stable-seed",
         "now": "2025-02-01T12:00:00Z",
-        "template": {
-            "id": "template-1",
+        "eventConfig": {
+            "id": "event-config-1",
             "name": "flowers",
             "baseIntervalDays": 7,
             "jitterPct": 0.2,
@@ -27,6 +27,7 @@ def test_recommend_next_is_deterministic_for_same_input() -> None:
             "timezone": "UTC",
             "minGapHours": 24,
             "allowedWindows": [{"weekday": 1, "startLocalTime": "18:00", "endLocalTime": "21:00"}],
+            "recurringBlackoutWeekdays": [],
             "blackoutDates": [],
         },
         "eventHistory": [],
@@ -46,8 +47,8 @@ def test_missed_options_endpoint_returns_asap_and_delayed() -> None:
         "now": "2025-02-01T12:00:00Z",
         "eventId": "event-1",
         "currentScheduledAt": "2025-01-31T12:00:00Z",
-        "template": {
-            "id": "template-1",
+        "eventConfig": {
+            "id": "event-config-1",
             "name": "flowers",
             "baseIntervalDays": 7,
             "jitterPct": 0.2,
@@ -56,6 +57,7 @@ def test_missed_options_endpoint_returns_asap_and_delayed() -> None:
             "timezone": "UTC",
             "minGapHours": 24,
             "allowedWindows": [],
+            "recurringBlackoutWeekdays": [],
             "blackoutDates": [],
         },
         "eventHistory": [],
@@ -74,9 +76,9 @@ def test_recompute_state_average_sentiment() -> None:
     payload = {
         "profileId": "profile-1",
         "now": "2025-02-01T12:00:00Z",
-        "templateSignals": [
-            {"templateId": "t1", "status": "COMPLETED", "sentimentLevel": "VERY_WELL"},
-            {"templateId": "t1", "status": "COMPLETED", "sentimentLevel": "POOR"},
+        "eventConfigSignals": [
+            {"eventConfigId": "t1", "status": "COMPLETED", "sentimentLevel": "VERY_WELL"},
+            {"eventConfigId": "t1", "status": "COMPLETED", "sentimentLevel": "POOR"},
         ],
     }
 

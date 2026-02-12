@@ -6,8 +6,9 @@ import { requireAuth } from "../middleware/auth.js";
 import { parseOrThrow } from "../lib/zod.js";
 import { ProfileModel } from "../models/profile.model.js";
 import { ScheduleSettingsModel } from "../models/schedule-settings.model.js";
-import { seedDefaultTemplates } from "../services/default-template-seeder.js";
+import { seedDefaultEventConfigs } from "../services/default-template-seeder.js";
 import { getOwnedProfile } from "../services/profile-access.js";
+import { enqueueProfileScheduleGeneration } from "../services/schedule-generation-queue.js";
 
 const createProfileSchema = z.object({
   profileName: z.string().min(1).max(120),
@@ -44,7 +45,7 @@ profilesRouter.post(
       active: true
     });
 
-    await seedDefaultTemplates(profile.id);
+    await seedDefaultEventConfigs(profile.id);
 
     await ScheduleSettingsModel.create({
       profileId: profile.id,
@@ -52,12 +53,19 @@ profilesRouter.post(
       reminderLeadHours: req.user!.reminderPreferences.reminderLeadHours,
       minGapHours: 24,
       allowedWindows: [
-        { weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" },
-        { weekday: 3, startLocalTime: "18:00", endLocalTime: "21:00" },
-        { weekday: 5, startLocalTime: "18:00", endLocalTime: "22:00" }
+        { weekday: 0, startLocalTime: "09:00", endLocalTime: "21:00" },
+        { weekday: 1, startLocalTime: "09:00", endLocalTime: "21:00" },
+        { weekday: 2, startLocalTime: "09:00", endLocalTime: "21:00" },
+        { weekday: 3, startLocalTime: "09:00", endLocalTime: "21:00" },
+        { weekday: 4, startLocalTime: "09:00", endLocalTime: "21:00" },
+        { weekday: 5, startLocalTime: "09:00", endLocalTime: "21:00" },
+        { weekday: 6, startLocalTime: "09:00", endLocalTime: "21:00" }
       ],
+      recurringBlackoutWeekdays: [],
       blackoutDates: []
     });
+
+    await enqueueProfileScheduleGeneration(profile.id).catch(() => undefined);
 
     res.status(201).json({ profile });
   })

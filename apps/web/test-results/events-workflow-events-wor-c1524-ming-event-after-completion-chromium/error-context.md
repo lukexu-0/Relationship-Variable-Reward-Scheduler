@@ -1,0 +1,181 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Variable Reward Scheduler" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Signed in as e2e-auto-generation-1770688371196@example.com (America/New_York)
+    - button "Logout" [ref=e8] [cursor=pointer]
+  - paragraph [ref=e9]: Internal server error
+  - main [ref=e10]:
+    - complementary [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e14]:
+          - heading "Profiles" [level=2] [ref=e15]
+          - paragraph [ref=e16]: Create and switch relationship contexts
+        - generic [ref=e19]:
+          - strong [ref=e21]: AutoGen Profile 1770688371406
+          - generic [ref=e22]:
+            - generic [ref=e23]: Selected
+            - button "Use" [ref=e24] [cursor=pointer]
+        - button "New profile" [ref=e26] [cursor=pointer]:
+          - generic [ref=e27] [cursor=pointer]: New profile
+          - generic [ref=e28] [cursor=pointer]: ▾
+        - generic [ref=e29]:
+          - generic [ref=e30]: Profile name
+          - textbox "Profile name" [ref=e31]
+          - generic [ref=e32]: Partner name (optional)
+          - textbox "Partner name (optional)" [ref=e33]
+          - button "Create profile" [ref=e35] [cursor=pointer]
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - heading "Events" [level=2] [ref=e39]
+          - button "Event Builder" [ref=e41] [cursor=pointer]:
+            - generic [ref=e42] [cursor=pointer]: Event Builder
+            - generic [ref=e43] [cursor=pointer]: ▾
+        - generic [ref=e44]:
+          - paragraph [ref=e45]: Choose an event to manage upcoming and history items.
+          - button "Flowers flowers 0 upcoming 0 total" [ref=e46] [cursor=pointer]:
+            - generic [ref=e47] [cursor=pointer]: Flowers
+            - generic [ref=e48] [cursor=pointer]: flowers
+            - generic [ref=e49] [cursor=pointer]:
+              - generic [ref=e50] [cursor=pointer]: 0 upcoming
+              - generic [ref=e51] [cursor=pointer]: 0 total
+        - separator [ref=e52]
+        - generic [ref=e53]:
+          - heading "Event Builder" [level=3] [ref=e54]
+          - paragraph [ref=e55]: "Selected: Flowers"
+          - generic [ref=e56]:
+            - generic [ref=e57]: 0 upcoming
+            - generic [ref=e58]: 0 events
+          - generic [ref=e59]:
+            - generic [ref=e60]: Event name
+            - textbox "Event name" [ref=e61]: Flowers
+            - generic [ref=e62]:
+              - generic [ref=e63]:
+                - generic [ref=e64]: Base interval days
+                - spinbutton "Base interval days" [ref=e65]: "14"
+              - generic [ref=e66]:
+                - generic [ref=e67]:
+                  - text: Jitter pct
+                  - generic "Jitter adds random variation to spacing around the base interval so events feel less predictable." [ref=e68]: "?"
+                - spinbutton "Jitter pct ?" [ref=e69]: "0.25"
+            - generic [ref=e70]: Enabled
+            - combobox "Enabled" [ref=e71]:
+              - option "Enabled" [selected]
+              - option "Disabled"
+            - generic [ref=e72]:
+              - button "Save event" [ref=e73] [cursor=pointer]
+              - button "Delete event config" [ref=e74] [cursor=pointer]
+          - separator [ref=e75]
+          - generic [ref=e76]:
+            - generic [ref=e77]: Schedule new event date
+            - textbox "Schedule new event date" [ref=e78]: 2026-02-10
+            - generic [ref=e79]: Include time
+            - combobox "Include time" [ref=e80]:
+              - option "No (date only)"
+              - option "Yes" [selected]
+            - generic [ref=e81]: Time
+            - textbox "Time" [ref=e82]: 10:00
+            - generic [ref=e83]: Event notes (optional)
+            - textbox "Event notes (optional)" [ref=e84]
+            - button "Add event" [ref=e86] [cursor=pointer]
+          - strong [ref=e88]: Event history
+          - separator [ref=e89]
+          - paragraph [ref=e90]: Select an event to edit or delete.
+    - generic [ref=e91]:
+      - generic [ref=e92]:
+        - generic [ref=e94]:
+          - heading "Calendar" [level=2] [ref=e95]
+          - paragraph [ref=e96]: Monthly event view
+        - generic [ref=e97]:
+          - generic [ref=e99]:
+            - button "Schedule Settings" [ref=e100] [cursor=pointer]:
+              - img [ref=e101] [cursor=pointer]
+              - generic [ref=e103] [cursor=pointer]: Schedule Settings
+            - generic [ref=e104]:
+              - generic [ref=e105]: Go to month
+              - textbox "Go to month" [ref=e106]: 2026-02
+            - generic [ref=e107]:
+              - button "Prev" [ref=e108] [cursor=pointer]
+              - button "Next" [ref=e109] [cursor=pointer]
+          - paragraph [ref=e110]: February 2026
+          - generic [ref=e111]:
+            - generic [ref=e112]: Any events
+            - generic [ref=e114]: Selected event dates (0)
+          - generic [ref=e116]:
+            - generic [ref=e117]: Sun
+            - generic [ref=e118]: Mon
+            - generic [ref=e119]: Tue
+            - generic [ref=e120]: Wed
+            - generic [ref=e121]: Thu
+            - generic [ref=e122]: Fri
+            - generic [ref=e123]: Sat
+          - generic [ref=e124]:
+            - button "1" [ref=e125]:
+              - generic [ref=e126]: "1"
+            - button "2" [ref=e127]:
+              - generic [ref=e128]: "2"
+            - button "3" [ref=e129]:
+              - generic [ref=e130]: "3"
+            - button "4" [ref=e131]:
+              - generic [ref=e132]: "4"
+            - button "5" [ref=e133]:
+              - generic [ref=e134]: "5"
+            - button "6" [ref=e135]:
+              - generic [ref=e136]: "6"
+            - button "7" [ref=e137]:
+              - generic [ref=e138]: "7"
+            - button "8" [ref=e139]:
+              - generic [ref=e140]: "8"
+            - button "9" [ref=e141]:
+              - generic [ref=e142]: "9"
+            - button "10" [ref=e143]:
+              - generic [ref=e144]: "10"
+            - button "11" [ref=e145]:
+              - generic [ref=e146]: "11"
+            - button "12" [ref=e147]:
+              - generic [ref=e148]: "12"
+            - button "13" [ref=e149]:
+              - generic [ref=e150]: "13"
+            - button "14" [ref=e151]:
+              - generic [ref=e152]: "14"
+            - button "15" [ref=e153]:
+              - generic [ref=e154]: "15"
+            - button "16" [ref=e155]:
+              - generic [ref=e156]: "16"
+            - button "17" [ref=e157]:
+              - generic [ref=e158]: "17"
+            - button "18" [ref=e159]:
+              - generic [ref=e160]: "18"
+            - button "19" [ref=e161]:
+              - generic [ref=e162]: "19"
+            - button "20" [ref=e163]:
+              - generic [ref=e164]: "20"
+            - button "21" [ref=e165]:
+              - generic [ref=e166]: "21"
+            - button "22" [ref=e167]:
+              - generic [ref=e168]: "22"
+            - button "23" [ref=e169]:
+              - generic [ref=e170]: "23"
+            - button "24" [ref=e171]:
+              - generic [ref=e172]: "24"
+            - button "25" [ref=e173]:
+              - generic [ref=e174]: "25"
+            - button "26" [ref=e175]:
+              - generic [ref=e176]: "26"
+            - button "27" [ref=e177]:
+              - generic [ref=e178]: "27"
+            - button "28" [ref=e179]:
+              - generic [ref=e180]: "28"
+      - generic [ref=e181]:
+        - heading "Upcoming Events for Flowers" [level=2] [ref=e184]
+        - generic [ref=e185]:
+          - generic [ref=e186]:
+            - strong [ref=e187]: Upcoming
+            - paragraph [ref=e188]: No upcoming events for this event.
+          - generic [ref=e189]:
+            - strong [ref=e191]: Past events
+            - paragraph [ref=e192]: No past events yet.
+```

@@ -1,92 +1,149 @@
 import { Router } from "express";
-import { createTemplateSchema, updateTemplateSchema } from "@reward/shared-validation";
+import {
+  createEventConfigSchema,
+  updateEventConfigSchema
+} from "@reward/shared-validation";
 
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAuth } from "../middleware/auth.js";
 import { parseOrThrow } from "../lib/zod.js";
 import { HttpError } from "../lib/http-error.js";
-import { RewardTemplateModel } from "../models/reward-template.model.js";
+import { RewardEventConfigModel } from "../models/reward-event-config.model.js";
+import { RewardEventModel } from "../models/reward-event.model.js";
 import { getOwnedProfile } from "../services/profile-access.js";
+import { enqueueProfileScheduleGeneration } from "../services/schedule-generation-queue.js";
 
-export const templatesRouter = Router();
-const TEMPLATE_CATEGORY_CONFLICT_CODE = "TEMPLATE_CATEGORY_EXISTS";
+export const eventConfigsRouter = Router();
+const EVENT_CONFIG_SLUG_CONFLICT_CODE = "EVENT_CONFIG_SLUG_EXISTS";
 
-templatesRouter.use(requireAuth);
+eventConfigsRouter.use(requireAuth);
 
-templatesRouter.get(
-  "/profiles/:profileId/templates",
+eventConfigsRouter.get(
+  "/profiles/:profileId/event-configs",
   asyncHandler(async (req, res) => {
     const profileId = String(req.params.profileId);
     await getOwnedProfile(profileId, req.user!.id);
-    const templates = await RewardTemplateModel.find({ profileId })
+    const eventConfigs = await RewardEventConfigModel.find({ profileId })
       .sort({ createdAt: -1 })
       .lean();
 
-    res.json({ templates });
+    res.json({ eventConfigs });
   })
 );
 
-templatesRouter.post(
-  "/profiles/:profileId/templates",
+eventConfigsRouter.post(
+  "/profiles/:profileId/event-configs",
   asyncHandler(async (req, res) => {
     const profileId = String(req.params.profileId);
     await getOwnedProfile(profileId, req.user!.id);
-    const input = parseOrThrow(createTemplateSchema, req.body);
-    const category = normalizeCategory(input.category);
+    const input = parseOrThrow(createEventConfigSchema, req.body);
+    const slug = normalizeSlug(input.slug);
 
-    const existing = await RewardTemplateModel.findOne({ profileId, category }).lean();
+    const existing = await RewardEventConfigModel.findOne({ profileId, slug }).lean();
     if (existing) {
-      throw new HttpError(409, "A template already exists for this category", {
-        code: TEMPLATE_CATEGORY_CONFLICT_CODE,
-        category
+      throw new HttpError(409, "An event config already exists for this slug", {
+        code: EVENT_CONFIG_SLUG_CONFLICT_CODE,
+        slug
       });
     }
 
-    const template = await RewardTemplateModel.create({
+    const eventConfig = await RewardEventConfigModel.create({
       profileId,
-      ...input,
-      category
+      name: input.name.trim(),
+      slug,
+      baseIntervalDays: input.baseIntervalDays,
+      jitterPct: input.jitterPct,
+      enabled: input.enabled
     });
 
-    res.status(201).json({ template });
+    await enqueueProfileScheduleGeneration(profileId).catch(() => undefined);
+
+    res.status(201).json({ eventConfig });
   })
 );
 
-templatesRouter.patch(
-  "/templates/:templateId",
+eventConfigsRouter.patch(
+  "/event-configs/:eventConfigId",
   asyncHandler(async (req, res) => {
-    const templateId = String(req.params.templateId);
-    const input = parseOrThrow(updateTemplateSchema, req.body);
-    const template = await RewardTemplateModel.findById(templateId);
-    if (!template) {
-      throw new HttpError(404, "Template not found");
+    const eventConfigId = String(req.params.eventConfigId);
+    const input = parseOrThrow(updateEventConfigSchema, req.body);
+    const eventConfig = await RewardEventConfigModel.findById(eventConfigId);
+    if (!eventConfig) {
+      throw new HttpError(404, "Event config not found");
     }
 
-    await getOwnedProfile(template.profileId.toString(), req.user!.id);
+    await getOwnedProfile(eventConfig.profileId.toString(), req.user!.id);
 
-    if (input.category !== undefined) {
-      const category = normalizeCategory(input.category);
-      const existing = await RewardTemplateModel.findOne({
-        _id: { $ne: template._id },
-        profileId: template.profileId,
-        category
+    const candidateSlug =
+      input.slug !== undefined
+        ? normalizeSlug(input.slug)
+        : input.name !== undefined
+          ? normalizeSlug(input.name)
+          : undefined;
+
+    if (candidateSlug !== undefined) {
+      const existing = await RewardEventConfigModel.findOne({
+        _id: { $ne: eventConfig._id },
+        profileId: eventConfig.profileId,
+        slug: candidateSlug
       }).lean();
       if (existing) {
-        throw new HttpError(409, "A template already exists for this category", {
-          code: TEMPLATE_CATEGORY_CONFLICT_CODE,
-          category
+        throw new HttpError(409, "An event config already exists for this slug", {
+          code: EVENT_CONFIG_SLUG_CONFLICT_CODE,
+          slug: candidateSlug
         });
       }
-      input.category = category;
+
+      eventConfig.slug = candidateSlug;
     }
 
-    Object.assign(template, input);
-    await template.save();
+    if (input.name !== undefined) {
+      eventConfig.name = input.name.trim();
+    }
+    if (input.baseIntervalDays !== undefined) {
+      eventConfig.baseIntervalDays = input.baseIntervalDays;
+    }
+    if (input.jitterPct !== undefined) {
+      eventConfig.jitterPct = input.jitterPct;
+    }
+    if (input.enabled !== undefined) {
+      eventConfig.enabled = input.enabled;
+    }
 
-    res.json({ template });
+    await eventConfig.save();
+
+    await enqueueProfileScheduleGeneration(eventConfig.profileId.toString()).catch(() => undefined);
+
+    res.json({ eventConfig });
   })
 );
 
-function normalizeCategory(value: string): string {
-  return value.trim().toLowerCase();
+eventConfigsRouter.delete(
+  "/event-configs/:eventConfigId",
+  asyncHandler(async (req, res) => {
+    const eventConfigId = String(req.params.eventConfigId);
+    const eventConfig = await RewardEventConfigModel.findById(eventConfigId);
+    if (!eventConfig) {
+      throw new HttpError(404, "Event config not found");
+    }
+
+    await getOwnedProfile(eventConfig.profileId.toString(), req.user!.id);
+
+    await RewardEventModel.deleteMany({
+      $or: [{ eventConfigId: eventConfig._id }, { templateId: eventConfig._id }]
+    });
+    await eventConfig.deleteOne();
+
+    await enqueueProfileScheduleGeneration(eventConfig.profileId.toString()).catch(() => undefined);
+
+    res.status(204).send();
+  })
+);
+
+function normalizeSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }

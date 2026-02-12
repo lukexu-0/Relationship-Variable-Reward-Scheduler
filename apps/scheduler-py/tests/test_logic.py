@@ -5,8 +5,8 @@ from scheduler_py.models import (
     EventHistoryItem,
     MissedOptionsRequest,
     RecommendNextRequest,
+    SchedulerEventConfig,
     SchedulerSettings,
-    SchedulerTemplate,
 )
 
 
@@ -29,18 +29,20 @@ def test_recommend_next_respects_windows() -> None:
     req = RecommendNextRequest(
         seed="seed-1",
         now=datetime(2025, 2, 1, 12, 0, tzinfo=UTC),
-        template=SchedulerTemplate(id="t1", name="flowers", baseIntervalDays=3, jitterPct=0.2),
+        eventConfig=SchedulerEventConfig(id="t1", name="flowers", baseIntervalDays=3, jitterPct=0.2),
         settings=SchedulerSettings(
             timezone="UTC",
             minGapHours=12,
             allowedWindows=[{"weekday": 0, "startLocalTime": "18:00", "endLocalTime": "20:00"}],
+            recurringBlackoutWeekdays=[],
             blackoutDates=[],
         ),
         eventHistory=[],
     )
 
     scheduled_at, _ = recommend_next_time(req)
-    assert scheduled_at.weekday() == 0
+    # App weekday 0 is Sunday; Python weekday for Sunday is 6.
+    assert scheduled_at.weekday() == 6
     assert 18 <= scheduled_at.hour <= 20
 
 
@@ -50,11 +52,12 @@ def test_missed_options_returns_two_choices() -> None:
         now=datetime(2025, 2, 1, 12, 0, tzinfo=UTC),
         eventId="event-1",
         currentScheduledAt=datetime(2025, 1, 31, 20, 0, tzinfo=UTC),
-        template=SchedulerTemplate(id="t1", name="date", baseIntervalDays=7, jitterPct=0.2),
+        eventConfig=SchedulerEventConfig(id="t1", name="date", baseIntervalDays=7, jitterPct=0.2),
         settings=SchedulerSettings(
             timezone="UTC",
             minGapHours=24,
             allowedWindows=[{"weekday": 5, "startLocalTime": "12:00", "endLocalTime": "20:00"}],
+            recurringBlackoutWeekdays=[],
             blackoutDates=[],
         ),
         eventHistory=[],
@@ -71,11 +74,12 @@ def test_missed_options_enforce_min_gap() -> None:
         now=datetime(2025, 2, 1, 12, 0, tzinfo=UTC),
         eventId="event-2",
         currentScheduledAt=datetime(2025, 1, 31, 20, 0, tzinfo=UTC),
-        template=SchedulerTemplate(id="t1", name="date", baseIntervalDays=7, jitterPct=0.2),
+        eventConfig=SchedulerEventConfig(id="t1", name="date", baseIntervalDays=7, jitterPct=0.2),
         settings=SchedulerSettings(
             timezone="UTC",
             minGapHours=48,
             allowedWindows=[],
+            recurringBlackoutWeekdays=[],
             blackoutDates=[],
         ),
         eventHistory=[
@@ -91,3 +95,26 @@ def test_missed_options_enforce_min_gap() -> None:
     options = build_missed_options(req)
     earliest = min(option.proposedAt for option in options)
     assert earliest >= datetime(2025, 2, 3, 2, 0, tzinfo=UTC)
+
+
+def test_recurring_weekday_blackout_pushes_recommendation() -> None:
+    req = RecommendNextRequest(
+        seed="seed-4",
+        now=datetime(2025, 2, 1, 12, 0, tzinfo=UTC),
+        eventConfig=SchedulerEventConfig(id="t1", name="flowers", baseIntervalDays=1, jitterPct=0.0),
+        settings=SchedulerSettings(
+            timezone="UTC",
+            minGapHours=1,
+            allowedWindows=[
+                {"weekday": 0, "startLocalTime": "12:00", "endLocalTime": "13:00"},
+                {"weekday": 1, "startLocalTime": "12:00", "endLocalTime": "13:00"},
+            ],
+            recurringBlackoutWeekdays=[0],
+            blackoutDates=[],
+        ),
+        eventHistory=[],
+    )
+
+    scheduled_at, _ = recommend_next_time(req)
+    # Sunday (app weekday 0 / Python weekday 6) is blacked out, so scheduler should move to Monday.
+    assert scheduled_at.weekday() == 0

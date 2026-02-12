@@ -11,12 +11,14 @@ Use this as the docs entrypoint.
 
 ## Local Development
 - `START_APP.md` (repo root): Canonical local startup, testing, and troubleshooting flow.
+- `apps/web/e2e/events-workflow.spec.ts`: Browser-level workflow coverage for dashboard/event/calendar/settings behavior.
+- `apps/api/src/security.test.ts`: API security regression checks (CORS/auth/input-hardening paths).
 
 ## Operational Expectations
 1. Keep API/web/worker/scheduler contracts aligned with shared types and shared validation.
 2. Preserve missed-event option flow and immutable event adjustment history.
-3. Preserve category-set invariants:
-   - one template per profile/category
-   - one active upcoming event per profile/category
+3. Preserve event-config invariants:
+   - one event config per profile slug/name
+   - one active upcoming event per profile/event-config
 4. Maintain 80%+ coverage and pass all security scans before release.
 5. Update docs when changing behavior, infra, env vars, or workflows.

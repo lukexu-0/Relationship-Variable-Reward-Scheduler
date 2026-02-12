@@ -5,13 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   getProfilesMock,
-  getTemplatesMock,
+  getEventConfigsMock,
   getEventsMock,
   getScheduleSettingsMock,
   getMissedOptionsMock,
   createProfileMock,
-  createTemplateMock,
-  updateTemplateMock,
+  createEventConfigMock,
+  updateEventConfigMock,
+  deleteEventConfigMock,
   createEventMock,
   updateEventMock,
   deleteEventMock,
@@ -22,13 +23,14 @@ const {
   updateScheduleSettingsMock
 } = vi.hoisted(() => ({
   getProfilesMock: vi.fn(),
-  getTemplatesMock: vi.fn(),
+  getEventConfigsMock: vi.fn(),
   getEventsMock: vi.fn(),
   getScheduleSettingsMock: vi.fn(),
   getMissedOptionsMock: vi.fn(),
   createProfileMock: vi.fn(),
-  createTemplateMock: vi.fn(),
-  updateTemplateMock: vi.fn(),
+  createEventConfigMock: vi.fn(),
+  updateEventConfigMock: vi.fn(),
+  deleteEventConfigMock: vi.fn(),
   createEventMock: vi.fn(),
   updateEventMock: vi.fn(),
   deleteEventMock: vi.fn(),
@@ -41,13 +43,14 @@ const {
 
 vi.mock("../../lib/api/client", () => ({
   getProfiles: getProfilesMock,
-  getTemplates: getTemplatesMock,
+  getEventConfigs: getEventConfigsMock,
   getEvents: getEventsMock,
   getScheduleSettings: getScheduleSettingsMock,
   getMissedOptions: getMissedOptionsMock,
   createProfile: createProfileMock,
-  createTemplate: createTemplateMock,
-  updateTemplate: updateTemplateMock,
+  createEventConfig: createEventConfigMock,
+  updateEventConfig: updateEventConfigMock,
+  deleteEventConfig: deleteEventConfigMock,
   createEvent: createEventMock,
   updateEvent: updateEventMock,
   deleteEvent: deleteEventMock,
@@ -67,12 +70,12 @@ describe("useDashboardData", () => {
     getProfilesMock.mockResolvedValue({
       profiles: [{ _id: "profile-1", profileName: "Main", partnerName: "Alex", active: true }]
     });
-    getTemplatesMock.mockResolvedValue({
-      templates: [
+    getEventConfigsMock.mockResolvedValue({
+      eventConfigs: [
         {
-          _id: "template-1",
-          name: "flowers",
-          category: "gift",
+          _id: "event-config-1",
+          name: "shared_activity",
+          slug: "shared_activity",
           baseIntervalDays: 10,
           jitterPct: 0.2,
           enabled: true,
@@ -84,9 +87,10 @@ describe("useDashboardData", () => {
       events: [
         {
           _id: "event-1",
-          templateId: "template-1",
+          eventConfigId: "event-config-1",
           scheduledAt: "2026-02-10T18:00:00.000Z",
           originalScheduledAt: "2026-02-10T18:00:00.000Z",
+          hasExplicitTime: true,
           status: "MISSED",
           notes: "Missed",
           adjustments: []
@@ -99,6 +103,7 @@ describe("useDashboardData", () => {
         reminderLeadHours: 24,
         minGapHours: 24,
         allowedWindows: [{ weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" }],
+        recurringBlackoutWeekdays: [0],
         blackoutDates: []
       }
     });
@@ -115,8 +120,9 @@ describe("useDashboardData", () => {
     });
 
     createProfileMock.mockResolvedValue({ profile: { _id: "profile-2" } });
-    createTemplateMock.mockResolvedValue({ template: { _id: "template-2", category: "trip" } });
-    updateTemplateMock.mockResolvedValue({ template: { _id: "template-1", category: "gift" } });
+    createEventConfigMock.mockResolvedValue({ eventConfig: { _id: "event-config-2", slug: "trip" } });
+    updateEventConfigMock.mockResolvedValue({ eventConfig: { _id: "event-config-1", slug: "flowers" } });
+    deleteEventConfigMock.mockResolvedValue({});
     createEventMock.mockResolvedValue({ event: { _id: "event-2" } });
     updateEventMock.mockResolvedValue({ event: { _id: "event-1", status: "SCHEDULED" } });
     deleteEventMock.mockResolvedValue({});
@@ -139,24 +145,28 @@ describe("useDashboardData", () => {
     );
 
     await waitFor(() => expect(result.current.selectedProfileId).toBe("profile-1"));
-    await waitFor(() => expect(result.current.selectedCategory).toBe("gift"));
+    await waitFor(() => expect(result.current.selectedEventConfigId).toBe("event-config-1"));
     await waitFor(() => expect(result.current.selectedEvent?._id).toBe("event-1"));
     await waitFor(() => expect(result.current.missedOptions).toHaveLength(1));
+    await waitFor(() => expect(result.current.eventConfigs[0]?.name).toBe("Shared Activity"));
+    await waitFor(() => expect(result.current.eventConfigs[0]?.slug).toBe("shared-activity"));
+    await waitFor(() => expect(result.current.selectedEvent?.eventConfigName).toBe("Shared Activity"));
 
     await act(async () => {
       await result.current.createProfileMutation.mutateAsync({ profileName: "Second", partnerName: "Sam" });
-      await result.current.createSetMutation.mutateAsync({
+      await result.current.createEventConfigMutation.mutateAsync({
         name: "trip",
-        category: "trip",
         baseIntervalDays: 14,
         jitterPct: 0.3
       });
-      await result.current.updateSetMutation.mutateAsync({
-        templateId: "template-1",
+      await result.current.updateEventConfigMutation.mutateAsync({
+        eventConfigId: "event-config-1",
         payload: { name: "flowers-updated", enabled: true }
       });
+      await result.current.deleteEventConfigMutation.mutateAsync("event-config-1");
       await result.current.createEventMutation.mutateAsync({
-        scheduledAt: "2026-02-12T18:00:00.000Z",
+        scheduledDate: "2026-02-12",
+        scheduledTime: "18:00",
         notes: "Bring flowers"
       });
       await result.current.updateEventMutation.mutateAsync({
@@ -168,7 +178,7 @@ describe("useDashboardData", () => {
       await result.current.missEventMutation.mutateAsync("event-1");
       await result.current.rescheduleEventMutation.mutateAsync({
         eventId: "event-1",
-        scheduledAt: "2026-02-14T18:00:00.000Z",
+        scheduledDate: "2026-02-14",
         reason: "Move"
       });
       await result.current.applyMissedOptionMutation.mutateAsync({ optionId: "opt-1", reason: "Apply" });
@@ -179,8 +189,9 @@ describe("useDashboardData", () => {
       profileName: "Second",
       partnerName: "Sam"
     });
-    expect(createTemplateMock).toHaveBeenCalled();
-    expect(updateTemplateMock).toHaveBeenCalled();
+    expect(createEventConfigMock).toHaveBeenCalled();
+    expect(updateEventConfigMock).toHaveBeenCalled();
+    expect(deleteEventConfigMock).toHaveBeenCalled();
     expect(createEventMock).toHaveBeenCalled();
     expect(updateEventMock).toHaveBeenCalled();
     expect(deleteEventMock).toHaveBeenCalledWith("token", "event-1");
@@ -195,5 +206,47 @@ describe("useDashboardData", () => {
     const iso = localDateTimeToIso("2026-02-10T19:30");
     expect(iso).toBe(new Date("2026-02-10T19:30").toISOString());
     expect(localDateTimeToIso("bad-value")).toBe("bad-value");
+  });
+
+  it("normalizes legacy default names for nice_date and activity", async () => {
+    getEventConfigsMock.mockResolvedValueOnce({
+      eventConfigs: [
+        {
+          _id: "event-config-date",
+          name: "nice_date",
+          slug: "nice_date",
+          baseIntervalDays: 10,
+          jitterPct: 0.2,
+          enabled: true
+        },
+        {
+          _id: "event-config-activity",
+          name: "activity",
+          slug: "activity",
+          baseIntervalDays: 7,
+          jitterPct: 0.2,
+          enabled: true
+        }
+      ]
+    });
+    getEventsMock.mockResolvedValueOnce({ events: [] });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => useDashboardData({ accessToken: "token", fallbackTimezone: "UTC" }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.eventConfigs).toHaveLength(2));
+
+    const namesBySlug = new Map(
+      result.current.eventConfigs.map((eventConfig) => [eventConfig.slug, eventConfig.name])
+    );
+    expect(namesBySlug.get("nice-date")).toBe("Date Night");
+    expect(namesBySlug.get("activity")).toBe("Shared Activity");
   });
 });

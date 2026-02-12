@@ -4,7 +4,13 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["src/test/setup.ts"],
-    exclude: ["**/dist/**", "**/node_modules/**", "**/.git/**"],
+    exclude: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/.git/**",
+      "e2e/**",
+      "playwright.config.ts"
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary", "html"],

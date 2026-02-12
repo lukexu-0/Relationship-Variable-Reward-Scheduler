@@ -1,29 +1,28 @@
 # Future Agent Handbook
 
-This document is the complete handoff guide for future agents working in this repository.
-
 Repository root:
 `/Users/lukexu/cs-projects/Relationship-Variable-Reward-Scheduler`
 
 ## 1. Product and locked decisions
 This project is a multi-user relationship variable reward scheduler with:
-- Authenticated user accounts.
-- Multiple relationship profiles per user.
-- Category sets backed by reward templates.
-- Adaptive scheduling with Python logic.
-- Missed-date recovery (`ASAP` and `DELAYED`) with user-driven apply.
-- Full audit history for adjusted/rescheduled events.
-- Optional email reminders via SES and queue workers.
+- Authenticated user accounts
+- Multiple relationship profiles per user
+- Event configs (event-centric model; replaces template/category sets)
+- Adaptive scheduling with Python logic
+- Missed-date recovery (`ASAP` / `DELAYED`) with user-driven apply
+- Immutable adjustment history for schedule changes
+- Optional email reminders via queue worker
+- Calendar-first scheduling UX with modal schedule settings
+- Quick upcoming-event delete from hover affordance (no confirm prompt)
 
 Locked domain decisions:
 - Sentiment scale: `VERY_POOR | POOR | NEUTRAL | WELL | VERY_WELL`
 - Event statuses: `SCHEDULED | COMPLETED | MISSED | RESCHEDULED | CANCELED`
-- Missed events are not direct negative training signal.
-- Every date change appends immutable adjustment metadata.
-- Single reminder per event reminder timestamp (`eventId + reminderAt` idempotency key).
-- Per-user timezone is first-class.
-- Exactly one template per `(profileId, category)` is allowed.
-- Exactly one active upcoming event per `(profileId, category)` is allowed.
+- Missed events are not direct negative training signal
+- Date/time changes append immutable adjustments
+- One active upcoming event per `(profileId, eventConfigId)`
+- Event config uniqueness per profile slug/name
+- Date-only events are supported; explicit time is optional (`hasExplicitTime`)
 
 ## 2. Stack
 - Web: React + TypeScript + Vite + React Query
@@ -34,22 +33,18 @@ Locked domain decisions:
 - Deploy: Kubernetes (Helm), AWS (ECR, EKS, Secrets Manager, SES, ElastiCache, Atlas externally)
 
 ## 3. Repository layout
-- `apps/web` React UI (feature-split modules)
+- `apps/web` React UI
 - `apps/api` Express API and domain models
 - `apps/worker` queue workers and email sender
 - `apps/scheduler-py` adaptive scheduler service
 - `packages/shared-types` cross-service domain types
 - `packages/shared-validation` zod contracts
-- `packages/shared-config` env loading/validation
-- `packages/shared-email` reminder email formatting
-- `deploy/helm/relationship-reward` Kubernetes chart
-- `docs` architecture, deployment, security, cost, and this guide
-- `.github/workflows` CI, deploy, monthly dependency updates
-- `.security` waiver config and scanner report outputs
+- `docs` architecture/deployment/security/cost/runbooks
+- `tools/migrations` data normalization scripts
 
 ## 4. Critical runtime contracts
 
-### API base routes
+### API routes (current)
 - `/api/v1/auth/register`
 - `/api/v1/auth/login`
 - `/api/v1/auth/refresh`
@@ -57,16 +52,16 @@ Locked domain decisions:
 - `/api/v1/auth/me`
 - `/api/v1/profiles`
 - `/api/v1/profiles/:profileId`
-- `/api/v1/profiles/:profileId/templates`
-- `/api/v1/templates/:templateId`
+- `/api/v1/profiles/:profileId/event-configs`
+- `/api/v1/event-configs/:eventConfigId`
 - `/api/v1/profiles/:profileId/schedule-settings`
 - `/api/v1/profiles/:profileId/events`
+- `/api/v1/events/:eventId`
 - `/api/v1/events/:eventId/complete`
 - `/api/v1/events/:eventId/miss`
 - `/api/v1/events/:eventId/missed-options`
 - `/api/v1/events/:eventId/missed-options/:optionId/apply`
 - `/api/v1/events/:eventId/reschedule`
-- `/api/v1/events/:eventId` (`PATCH` update, `DELETE` hard delete)
 
 ### Scheduler service routes
 - `GET /healthz`
@@ -83,151 +78,89 @@ Locked domain decisions:
 - `users`
 - `refresh_tokens`
 - `profiles`
-- `reward_templates`
+- `reward_templates` (event-config semantics)
 - `schedule_settings`
 - `reward_events`
 - `scheduler_state`
 - `email_logs`
 - `idempotency_keys`
 
-## 5. Core domain behavior
+## 5. Core behavior
 
-### Default templates
+### Default event configs
 Created on profile creation:
-- `flowers`
-- `nice_date`
-- `activity`
-- `thoughtful_message`
+- `Flowers` (`flowers`)
+- `Date Night` (`date-night`)
+- `Shared Activity` (`shared-activity`)
+- `Thoughtful Message` (`thoughtful-message`)
 
 ### Event lifecycle
 1. Event starts as `SCHEDULED`.
-2. Completion marks `COMPLETED`, stores sentiment.
-3. Missing marks `MISSED`, stores `missedAt`, then fetches options.
-4. Applying option marks `RESCHEDULED`, appends immutable adjustment entry.
+2. Completion marks `COMPLETED` and stores sentiment.
+3. Missing marks `MISSED` and computes options.
+4. Applying option marks `RESCHEDULED` and appends adjustment.
 5. Manual reschedule also marks `RESCHEDULED` and appends adjustment.
-6. Direct event edit supports notes and/or scheduled time updates.
-7. Event hard delete permanently removes the event record.
+6. Direct edit supports notes and/or date/time updates.
+7. Hard delete permanently removes event record.
 
-### Missed-option determinism
-- Missed option generation uses deterministic seed and `missedAt` anchor.
-- Option IDs must remain stable between fetch and apply.
-- Missed option endpoints now enforce `event.status === MISSED`.
+### Scheduling triggers
+API enqueues schedule generation after:
+- profile create
+- event-config create/update/delete
+- settings save
+- event completion/miss/missed-option apply/delete/reschedule/schedule-changing edit
 
-### Scheduler logic
-- Adaptive interval = base interval adjusted by weighted recent sentiment.
-- Jitter applied within configured percentage bounds.
-- Candidate times constrained by:
-  - timezone
-  - min-gap
-  - allowed windows
-  - blackout dates
-- Missed options return both `ASAP` and `DELAYED` with rationale and one recommended option.
-- Worker scheduling is category-aware; at most one future active event is created per category.
+Worker behavior:
+- immediate jobs handle near-real-time regeneration
+- daily fallback scan preserves schedule continuity
 
-## 6. Local development workflows
+## 6. Migration notes
+Current normalization script:
+```bash
+corepack pnpm --filter @reward/api exec tsx ../../tools/migrations/normalize-event-configs.ts
+```
 
-Primary startup doc:
-- `START_APP.md`
+What it enforces:
+- slug backfill + dedupe per profile
+- event reassignment from removed configs
+- one active upcoming event per event config
+- `hasExplicitTime=false` backfill for old events
+- `recurringBlackoutWeekdays=[]` backfill for settings docs
+
+## 7. Local workflows
+See `START_APP.md` for canonical startup/testing.
 
 Common commands:
 ```bash
 corepack pnpm install
+corepack pnpm local:start
 corepack pnpm -r build
 corepack pnpm -r test
+corepack pnpm --filter @reward/web exec playwright install chromium
+corepack pnpm --filter @reward/web test:e2e
 ```
 
-Category-set data normalization command (upgrade existing DBs):
+If Vite runs on a non-default port:
 ```bash
-corepack pnpm --filter @reward/api exec tsx ../../tools/migrations/normalize-category-sets.ts
+E2E_BASE_URL=http://localhost:5174 corepack pnpm --filter @reward/web test:e2e
 ```
 
-Python scheduler tests:
-```bash
-cd apps/scheduler-py
-python3 -m uv sync --group dev
-python3 -m uv run pytest --cov=src/scheduler_py --cov-report=term --cov-fail-under=80
-```
+## 8. Coverage and quality gates
+- Keep package coverage thresholds at or above configured gates (80% where configured).
+- Do not lower thresholds to bypass failures.
+- Keep docs updated for any contract/behavior changes.
+- Keep API security regression tests green in `apps/api/src/security.test.ts`.
 
-## 7. Testing and coverage expectations
-- API tests: high-coverage integration tests in `apps/api/src/app.test.ts`.
-- Worker tests: queue and email behavior in `apps/worker/src/**/*.test.ts`.
-- Web tests: feature-level integration and state tests in `apps/web/src/**/*.test.tsx`.
-- Scheduler tests: logic + endpoint tests in `apps/scheduler-py/tests`.
-
-Coverage policy:
-- Maintain 80%+ coverage thresholds in package test configs and Python coverage gate.
-- Do not lower thresholds to make failures disappear.
-
-## 8. Security expectations
+## 9. Security expectations
 - JS audit: `pnpm audit --audit-level=low`
 - Python audit: `pip_audit -r apps/scheduler-py/requirements.audit.txt`
-- Container/FS scan: Trivy in CI
-- Waivers are temporary only and validated by:
-  - `tools/security/check-waivers.mjs`
-  - `.security/waivers.yaml`
+- Trivy scans in CI
+- Temporary waivers only via `.security/waivers.yaml`
 
-Important compatibility note:
-- `apps/scheduler-py/requirements.audit.txt` intentionally includes Python-version markers for NumPy to keep audits compatible with older local Python runtimes and CI Python 3.12+.
-
-## 9. CI/CD behavior
-
-### CI (`.github/workflows/ci.yml`)
-- Installs dependencies.
-- Builds all packages.
-- Runs JS test suites.
-- Runs scheduler Python tests with coverage gate.
-- Runs security scans.
-- Enforces waiver policy.
-
-### Deploy (`.github/workflows/deploy.yml`)
-- Manual trigger with `dev`/`prod`.
-- Builds and pushes all service images to ECR with commit-derived tag.
-- Configures kube context.
-- Deploys via Helm with environment-specific values.
-
-### Monthly updates (`.github/workflows/monthly-dependency-update.yml`)
-- Upgrades JS deps and Python lock.
-- Syncs scheduler audit requirements.
-- Rebuilds, retests, re-audits.
-- Opens PR with `dependencies` and `security` labels.
-
-## 10. Deployment and infrastructure docs
-- Step-by-step deployment:
-  - `docs/deployment.md`
-- AWS cost controls:
-  - `docs/aws-cost-guardrails.md`
-- Security policy:
-  - `docs/security.md`
-
-## 11. Cost guardrails that must not be regressed
-- Dev ingress disabled by default.
-- Conservative replica counts.
-- Resource requests/limits explicitly set.
-- Budget/anomaly detection required before sustained usage.
-- Keep emergency scale-to-zero and cluster teardown documented and usable.
-
-## 12. Safe-change checklist for future agents
-Before merging any non-trivial change:
-1. Update shared types and validation schemas together.
-2. Keep route contracts aligned with web client usage.
-3. Preserve scheduler determinism for equal seed/input.
-4. Preserve missed-option and adjustment audit behavior.
-5. Preserve category-set uniqueness constraints (template + active upcoming event).
-6. Run build + tests + coverage + audits locally.
-7. Update docs when behavior, env vars, or workflows change.
-8. Avoid weakening security gates without explicit owner approval.
-
-## 13. Known local pitfalls
-- `corepack enable` can fail with `EACCES`; use `corepack pnpm ...` directly.
-- Docker may be unavailable; use local Mongo/Redis services via Homebrew.
-- SES is optional for local testing; worker can be skipped for local no-email runs.
-- If `pip_audit` uses an older system Python, rely on version-marked requirements and CI for canonical security check.
-
-## 14. Definition of done for feature work
-A feature is not done unless all of the following are true:
-1. Implementation is complete across relevant services.
-2. Automated tests cover success and failure paths.
-3. Coverage gates still pass.
-4. Security scans still pass.
-5. Local startup and docs remain accurate.
-6. Deployment impact is reflected in Helm/workflows/docs as needed.
+## 10. Change checklist
+Before merging:
+1. Align shared types, shared validation, API routes, and web client methods.
+2. Preserve event-config uniqueness + active-upcoming uniqueness invariants.
+3. Keep missed-option determinism and adjustment history behavior.
+4. Run build/tests (and e2e where applicable).
+5. Update docs (`README.md`, `START_APP.md`, `docs/*`) for behavior/API changes.

@@ -5,34 +5,43 @@ import {
   applyMissedOption,
   completeEvent,
   createEvent,
+  createEventConfig,
   createProfile,
-  createTemplate,
   deleteEvent,
+  deleteEventConfig,
+  getEventConfigs,
   getEvents,
   getMissedOptions,
   getProfiles,
   getScheduleSettings,
-  getTemplates,
   missEvent,
   rescheduleEvent,
   updateEvent,
-  updateScheduleSettings,
-  updateTemplate
+  updateEventConfig,
+  updateScheduleSettings
 } from "../../lib/api/client";
 
 const ACTIVE_UPCOMING_STATUSES = ["SCHEDULED", "RESCHEDULED"] as const;
+const DEFAULT_EVENT_CONFIG_NAME_BY_SLUG: Record<string, string> = {
+  flowers: "Flowers",
+  "date-night": "Date Night",
+  "nice-date": "Date Night",
+  "shared-activity": "Shared Activity",
+  activity: "Shared Activity",
+  "thoughtful-message": "Thoughtful Message"
+};
 
-type Profile = {
+export type Profile = {
   _id: string;
   profileName: string;
   partnerName?: string;
   active: boolean;
 };
 
-type Template = {
+export type EventConfig = {
   _id: string;
   name: string;
-  category: string;
+  slug: string;
   baseIntervalDays: number;
   jitterPct: number;
   enabled: boolean;
@@ -40,11 +49,12 @@ type Template = {
   updatedAt?: string;
 };
 
-type RewardEvent = {
+export type RewardEvent = {
   _id: string;
-  templateId: string;
+  eventConfigId: string;
   scheduledAt: string;
   originalScheduledAt: string;
+  hasExplicitTime: boolean;
   status: string;
   notes?: string;
   adjustments: Array<{
@@ -63,6 +73,7 @@ type ScheduleSettings = {
   reminderLeadHours: number;
   minGapHours: number;
   allowedWindows: Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>;
+  recurringBlackoutWeekdays: number[];
   blackoutDates: BlackoutDate[];
 };
 
@@ -74,8 +85,9 @@ interface UseDashboardDataProps {
 export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboardDataProps) {
   const queryClient = useQueryClient();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedEventConfigId, setSelectedEventConfigId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
 
   const profilesQuery = useQuery({
     queryKey: ["profiles"],
@@ -83,9 +95,9 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
     enabled: Boolean(accessToken)
   });
 
-  const templatesQuery = useQuery({
-    queryKey: ["templates", selectedProfileId],
-    queryFn: () => getTemplates(accessToken, selectedProfileId as string),
+  const eventConfigsQuery = useQuery({
+    queryKey: ["event-configs", selectedProfileId],
+    queryFn: () => getEventConfigs(accessToken, selectedProfileId as string),
     enabled: Boolean(selectedProfileId)
   });
 
@@ -102,16 +114,26 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
   });
 
   const profiles = useMemo<Profile[]>(() => profilesQuery.data?.profiles ?? [], [profilesQuery.data]);
-  const templates = useMemo<Template[]>(() => templatesQuery.data?.templates ?? [], [templatesQuery.data]);
+  const eventConfigs = useMemo<EventConfig[]>(
+    () =>
+      (eventConfigsQuery.data?.eventConfigs ?? []).map((eventConfig) => ({
+        ...eventConfig,
+        ...normalizeEventConfigPresentation(eventConfig.name, eventConfig.slug)
+      })),
+    [eventConfigsQuery.data]
+  );
   const events = useMemo<RewardEvent[]>(
     () =>
       (eventsQuery.data?.events ?? []).map((event) => ({
         ...event,
+        eventConfigId: event.eventConfigId ?? (event as { templateId?: string }).templateId ?? "",
         status: event.status ?? "SCHEDULED",
+        hasExplicitTime: Boolean(event.hasExplicitTime),
         adjustments: Array.isArray(event.adjustments) ? event.adjustments : []
       })),
     [eventsQuery.data]
   );
+
   const settings = useMemo<ScheduleSettings>(() => {
     const rawSettings = settingsQuery.data?.settings;
 
@@ -121,7 +143,10 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
       minGapHours: rawSettings?.minGapHours ?? 24,
       allowedWindows: Array.isArray(rawSettings?.allowedWindows)
         ? rawSettings.allowedWindows
-        : [{ weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" }],
+        : defaultAllowedWindows(),
+      recurringBlackoutWeekdays: Array.isArray(rawSettings?.recurringBlackoutWeekdays)
+        ? rawSettings.recurringBlackoutWeekdays
+        : [],
       blackoutDates: Array.isArray(rawSettings?.blackoutDates) ? rawSettings.blackoutDates : []
     };
   }, [fallbackTimezone, settingsQuery.data?.settings]);
@@ -132,76 +157,71 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
     }
   }, [profiles, selectedProfileId]);
 
-  const categories = useMemo(
-    () => Array.from(new Set(templates.map((template) => template.category))).sort(),
-    [templates]
-  );
-
   useEffect(() => {
-    if (categories.length === 0) {
-      setSelectedCategory(null);
+    if (eventConfigs.length === 0) {
+      setSelectedEventConfigId(null);
       return;
     }
 
-    if (!selectedCategory || !categories.includes(selectedCategory)) {
-      setSelectedCategory(categories[0]);
+    if (!selectedEventConfigId || !eventConfigs.some((eventConfig) => eventConfig._id === selectedEventConfigId)) {
+      setSelectedEventConfigId(eventConfigs[0]._id);
     }
-  }, [categories, selectedCategory]);
+  }, [eventConfigs, selectedEventConfigId]);
 
-  const templateById = useMemo(
-    () => new Map(templates.map((template) => [template._id, template])),
-    [templates]
+  const eventConfigById = useMemo(
+    () => new Map(eventConfigs.map((eventConfig) => [eventConfig._id, eventConfig])),
+    [eventConfigs]
   );
 
   const eventsWithContext = useMemo(
     () =>
       events.map((event) => {
-        const template = templateById.get(event.templateId);
+        const eventConfig = eventConfigById.get(event.eventConfigId);
         return {
           ...event,
-          category: template?.category ?? "unknown",
-          templateName: template?.name ?? event.templateId
+          eventConfigName: eventConfig?.name ?? event.eventConfigId,
+          eventConfigSlug: eventConfig?.slug ?? "unknown"
         };
       }),
-    [events, templateById]
+    [events, eventConfigById]
   );
 
-  const selectedSet = useMemo(
-    () => templates.find((template) => template.category === selectedCategory) ?? null,
-    [selectedCategory, templates]
+  const selectedEventConfig = useMemo(
+    () => eventConfigs.find((eventConfig) => eventConfig._id === selectedEventConfigId) ?? null,
+    [eventConfigs, selectedEventConfigId]
   );
 
-  const eventsForSelectedCategory = useMemo(
+  const eventsForSelectedConfig = useMemo(
     () =>
       eventsWithContext
-        .filter((event) => event.category === selectedCategory)
+        .filter((event) => event.eventConfigId === selectedEventConfigId)
         .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime()),
-    [eventsWithContext, selectedCategory]
+    [eventsWithContext, selectedEventConfigId]
   );
 
-  const upcomingForSelectedCategory = useMemo(
+  const upcomingForSelectedConfig = useMemo(
     () =>
-      eventsForSelectedCategory.filter(
+      eventsForSelectedConfig.filter(
         (event) =>
           ACTIVE_UPCOMING_STATUSES.includes(event.status as (typeof ACTIVE_UPCOMING_STATUSES)[number]) &&
           new Date(event.scheduledAt).getTime() > Date.now()
       ),
-    [eventsForSelectedCategory]
+    [eventsForSelectedConfig]
   );
 
   useEffect(() => {
     if (!selectedEventId) {
-      if (eventsForSelectedCategory.length > 0) {
-        setSelectedEventId(eventsForSelectedCategory[0]._id);
+      if (eventsForSelectedConfig.length > 0) {
+        setSelectedEventId(eventsForSelectedConfig[0]._id);
       }
       return;
     }
 
-    const exists = eventsForSelectedCategory.some((event) => event._id === selectedEventId);
+    const exists = eventsForSelectedConfig.some((event) => event._id === selectedEventId);
     if (!exists) {
-      setSelectedEventId(eventsForSelectedCategory[0]?._id ?? null);
+      setSelectedEventId(eventsForSelectedConfig[0]?._id ?? null);
     }
-  }, [eventsForSelectedCategory, selectedEventId]);
+  }, [eventsForSelectedConfig, selectedEventId]);
 
   const selectedEvent = useMemo(
     () => eventsWithContext.find((event) => event._id === selectedEventId) ?? null,
@@ -223,44 +243,58 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
     }
   });
 
-  const createSetMutation = useMutation({
-    mutationFn: (payload: { name: string; category: string; baseIntervalDays: number; jitterPct: number }) =>
-      createTemplate(accessToken, selectedProfileId as string, {
+  const createEventConfigMutation = useMutation({
+    mutationFn: (payload: { name: string; baseIntervalDays: number; jitterPct: number }) =>
+      createEventConfig(accessToken, selectedProfileId as string, {
         ...payload,
-        category: payload.category.trim().toLowerCase(),
+        slug: slugify(payload.name),
         enabled: true
       }),
     onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ["templates", selectedProfileId] });
-      if (result.template?.category) {
-        setSelectedCategory(result.template.category);
-      }
+      await queryClient.invalidateQueries({ queryKey: ["event-configs", selectedProfileId] });
+      setSelectedEventConfigId(result.eventConfig._id);
     }
   });
 
-  const updateSetMutation = useMutation({
+  const updateEventConfigMutation = useMutation({
     mutationFn: ({
-      templateId,
+      eventConfigId,
       payload
     }: {
-      templateId: string;
+      eventConfigId: string;
       payload: Partial<{
         name: string;
         baseIntervalDays: number;
         jitterPct: number;
         enabled: boolean;
       }>;
-    }) => updateTemplate(accessToken, templateId, payload),
+    }) =>
+      updateEventConfig(accessToken, eventConfigId, {
+        ...payload,
+        slug: payload.name ? slugify(payload.name) : undefined
+      }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["templates", selectedProfileId] });
+      await queryClient.invalidateQueries({ queryKey: ["event-configs", selectedProfileId] });
+    }
+  });
+
+  const deleteEventConfigMutation = useMutation({
+    mutationFn: (eventConfigId: string) => deleteEventConfig(accessToken, eventConfigId),
+    onSuccess: async (_result, eventConfigId) => {
+      if (selectedEventConfigId === eventConfigId) {
+        setSelectedEventConfigId(null);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["event-configs", selectedProfileId] });
+      await queryClient.invalidateQueries({ queryKey: ["events", selectedProfileId] });
     }
   });
 
   const createEventMutation = useMutation({
-    mutationFn: (payload: { scheduledAt: string; notes?: string }) =>
+    mutationFn: (payload: { scheduledDate: string; scheduledTime?: string; notes?: string }) =>
       createEvent(accessToken, selectedProfileId as string, {
-        templateId: selectedSet?._id as string,
-        scheduledAt: payload.scheduledAt,
+        eventConfigId: selectedEventConfig?._id as string,
+        scheduledDate: payload.scheduledDate,
+        scheduledTime: payload.scheduledTime,
         notes: payload.notes
       }),
     onSuccess: async () => {
@@ -274,7 +308,7 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
       payload
     }: {
       eventId: string;
-      payload: { scheduledAt?: string; notes?: string; reason?: string };
+      payload: { scheduledDate?: string; scheduledTime?: string; notes?: string; reason?: string };
     }) => updateEvent(accessToken, eventId, payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["events", selectedProfileId] });
@@ -308,8 +342,17 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
   });
 
   const rescheduleEventMutation = useMutation({
-    mutationFn: ({ eventId, scheduledAt, reason }: { eventId: string; scheduledAt: string; reason: string }) =>
-      rescheduleEvent(accessToken, eventId, { scheduledAt, reason }),
+    mutationFn: ({
+      eventId,
+      scheduledDate,
+      scheduledTime,
+      reason
+    }: {
+      eventId: string;
+      scheduledDate: string;
+      scheduledTime?: string;
+      reason: string;
+    }) => rescheduleEvent(accessToken, eventId, { scheduledDate, scheduledTime, reason }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["events", selectedProfileId] });
     }
@@ -336,25 +379,27 @@ export function useDashboardData({ accessToken, fallbackTimezone }: UseDashboard
   return {
     selectedProfileId,
     setSelectedProfileId,
-    selectedCategory,
-    setSelectedCategory,
+    selectedEventConfigId,
+    setSelectedEventConfigId,
     selectedEventId,
     setSelectedEventId,
+    selectedCalendarDate,
+    setSelectedCalendarDate,
     profiles,
-    templates,
-    categories,
+    eventConfigs,
     events: eventsWithContext,
-    eventsForSelectedCategory,
-    upcomingForSelectedCategory,
-    selectedSet,
+    eventsForSelectedConfig,
+    upcomingForSelectedConfig,
+    selectedEventConfig,
     selectedEvent,
     settings,
     missedOptions: missedOptionsQuery.data?.options ?? [],
     loading:
-      profilesQuery.isLoading || templatesQuery.isLoading || eventsQuery.isLoading || settingsQuery.isLoading,
+      profilesQuery.isLoading || eventConfigsQuery.isLoading || eventsQuery.isLoading || settingsQuery.isLoading,
     createProfileMutation,
-    createSetMutation,
-    updateSetMutation,
+    createEventConfigMutation,
+    updateEventConfigMutation,
+    deleteEventConfigMutation,
     createEventMutation,
     updateEventMutation,
     deleteEventMutation,
@@ -373,4 +418,57 @@ export function localDateTimeToIso(value: string): string {
   }
 
   return parsed.toISOString();
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function normalizeEventConfigPresentation(name: string, slug?: string) {
+  const normalizedSlug = slugify(slug || name);
+  const canonicalDefaultName = DEFAULT_EVENT_CONFIG_NAME_BY_SLUG[normalizedSlug];
+  const trimmedName = name.trim();
+
+  if (!canonicalDefaultName) {
+    return {
+      name: trimmedName || humanizeSlug(normalizedSlug),
+      slug: normalizedSlug
+    };
+  }
+
+  if (!trimmedName) {
+    return { name: canonicalDefaultName, slug: normalizedSlug };
+  }
+
+  const legacyMachineFormat =
+    trimmedName === trimmedName.toLowerCase() || /[_-]/.test(trimmedName);
+
+  if (legacyMachineFormat && slugify(trimmedName) === normalizedSlug) {
+    return { name: canonicalDefaultName, slug: normalizedSlug };
+  }
+
+  return {
+    name: trimmedName,
+    slug: normalizedSlug
+  };
+}
+
+function humanizeSlug(value: string): string {
+  return value
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1).toLowerCase()}`)
+    .join(" ");
+}
+
+function defaultAllowedWindows() {
+  return [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
+    weekday,
+    startLocalTime: "09:00",
+    endLocalTime: "21:00"
+  }));
 }

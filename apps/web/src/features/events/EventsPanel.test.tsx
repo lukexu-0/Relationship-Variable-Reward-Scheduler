@@ -53,7 +53,7 @@ describe("EventsPanel", () => {
     rescheduleEventMock.mockResolvedValue({ event: { _id: "event-1", status: "RESCHEDULED" } });
   });
 
-  it("converts datetime-local input into ISO string when creating events", async () => {
+  it("sends date and time fields when creating events", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const user = userEvent.setup();
 
@@ -70,8 +70,9 @@ describe("EventsPanel", () => {
     await user.click(screen.getByRole("button", { name: "Add event" }));
 
     await waitFor(() => expect(createEventMock).toHaveBeenCalledTimes(1));
-    const payload = createEventMock.mock.calls[0]?.[2] as { scheduledAt: string };
-    expect(payload.scheduledAt).toBe(new Date("2026-02-10T18:30").toISOString());
+    const payload = createEventMock.mock.calls[0]?.[2] as { scheduledDate: string; scheduledTime?: string };
+    expect(payload.scheduledDate).toBe("2026-02-10");
+    expect(payload.scheduledTime).toBe("18:30");
   });
 
   it("renders original date and adjustment history for rescheduled events", async () => {
@@ -79,7 +80,8 @@ describe("EventsPanel", () => {
       events: [
         {
           _id: "event-1",
-          templateId: "template-1",
+          eventConfigId: "template-1",
+          hasExplicitTime: true,
           scheduledAt: "2026-02-11T19:00:00.000Z",
           originalScheduledAt: "2026-02-10T19:00:00.000Z",
           status: "RESCHEDULED",
@@ -122,7 +124,8 @@ describe("EventsPanel", () => {
     await user.click(screen.getByRole("button", { name: "+1 day" }));
     await waitFor(() =>
       expect(rescheduleEventMock).toHaveBeenCalledWith("token", "event-1", {
-        scheduledAt: expect.any(String),
+        scheduledDate: expect.any(String),
+        scheduledTime: expect.any(String),
         reason: "Adjusted by user"
       })
     );

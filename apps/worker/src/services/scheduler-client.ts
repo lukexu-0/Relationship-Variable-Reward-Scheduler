@@ -13,6 +13,7 @@ interface SchedulerSettingsPayload {
   timezone: string;
   minGapHours: number;
   allowedWindows: Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>;
+  recurringBlackoutWeekdays: number[];
   blackoutDates: Array<{ startAt: string; endAt?: string; allDay?: boolean; note?: string }>;
 }
 
@@ -27,7 +28,7 @@ interface SchedulerEventHistoryPayload {
 interface RecommendNextRequest {
   seed: string;
   now: string;
-  template: SchedulerTemplatePayload;
+  eventConfig: SchedulerTemplatePayload;
   settings: SchedulerSettingsPayload;
   eventHistory: SchedulerEventHistoryPayload[];
 }

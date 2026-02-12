@@ -123,13 +123,19 @@ docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/reward-scheduler-p
 docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/reward-web:$IMAGE_TAG
 ```
 
-## 7.1 Run category-set normalization migration (existing data only)
-If this environment contains data created before category-set enforcement, run:
+## 7.1 Run event-config normalization migration (existing data only)
+If this environment contains data created before event-config enforcement, run:
 
 ```bash
 cd /Users/lukexu/cs-projects/Relationship-Variable-Reward-Scheduler
-corepack pnpm --filter @reward/api exec tsx ../../tools/migrations/normalize-category-sets.ts
+corepack pnpm --filter @reward/api exec tsx ../../tools/migrations/normalize-event-configs.ts
 ```
+
+This migration:
+- normalizes/deduplicates event config slugs
+- reassigns orphaned events to kept configs
+- enforces one active upcoming event per event config
+- backfills optional-time and recurring-blackout fields
 
 ## 8. Deploy to dev with Helm
 ```bash
@@ -160,6 +166,16 @@ kubectl -n $NAMESPACE_DEV get externalsecret
 kubectl -n $NAMESPACE_DEV logs deploy/api --tail=100
 kubectl -n $NAMESPACE_DEV logs deploy/worker --tail=100
 ```
+
+Queue behavior to verify:
+- API writes that affect scheduling should enqueue `schedule-generation` jobs.
+- Profile-triggered queue jobs are deduped by `jobId=profile-refresh:<profileId>`.
+- Worker should consume those jobs and maintain one active upcoming event per event config.
+- High-value trigger paths to validate post-deploy:
+  - event complete/miss/reschedule/delete/edit(schedule-change)
+  - event-config create/update/delete
+  - schedule settings save
+- If worker is intentionally disabled, immediate regeneration will not occur (daily/worker behavior is unavailable).
 
 Health checks:
 - API: `GET /healthz`

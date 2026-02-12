@@ -33,7 +33,7 @@ export function BlackoutDatesEditor({ blackoutDates, onChange }: BlackoutDatesEd
   return (
     <div className="blackout-editor">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-        <strong>Blackout dates</strong>
+        <strong>Specific date ranges</strong>
         <Button
           type="button"
           variant="soft"

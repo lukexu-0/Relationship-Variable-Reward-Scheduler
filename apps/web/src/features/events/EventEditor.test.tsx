@@ -18,7 +18,8 @@ describe("EventEditor", () => {
           notes: "Initial",
           scheduledAt: "2026-02-11T18:00:00.000Z",
           originalScheduledAt: "2026-02-11T18:00:00.000Z",
-          templateName: "flowers",
+          hasExplicitTime: true,
+          eventConfigName: "flowers",
           adjustments: []
         }}
         onSave={onSave}

@@ -5,11 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { EventSetInspector } from "./EventSetInspector";
 
 describe("EventSetInspector", () => {
-  it("manages selected set, events, and missed options", async () => {
+  it("manages selected config, events, and missed options", async () => {
     const user = userEvent.setup();
     const onSelectEvent = vi.fn();
     const onApplyMissedOption = vi.fn();
-    const onUpdateSet = vi.fn();
+    const onUpdateEventConfig = vi.fn();
     const onCreateEvent = vi.fn();
     const onSaveEvent = vi.fn();
     const onDeleteEvent = vi.fn();
@@ -19,33 +19,35 @@ describe("EventSetInspector", () => {
 
     render(
       <EventSetInspector
-        selectedSet={{
-          _id: "template-1",
+        selectedEventConfig={{
+          _id: "event-config-1",
           name: "flowers",
-          category: "gift",
+          slug: "flowers",
           baseIntervalDays: 10,
           jitterPct: 0.2,
           enabled: true
         }}
-        eventsForCategory={[
+        eventsForConfig={[
           {
             _id: "event-1",
             status: "MISSED",
             notes: "Missed",
             scheduledAt: "2026-02-11T18:00:00.000Z",
             originalScheduledAt: "2026-02-11T18:00:00.000Z",
-            templateName: "flowers",
+            hasExplicitTime: true,
+            eventConfigName: "flowers",
             adjustments: []
           }
         ]}
-        upcomingForCategory={[]}
+        upcomingForConfig={[]}
         selectedEvent={{
           _id: "event-1",
           status: "MISSED",
           notes: "Missed",
           scheduledAt: "2026-02-11T18:00:00.000Z",
           originalScheduledAt: "2026-02-11T18:00:00.000Z",
-          templateName: "flowers",
+          hasExplicitTime: true,
+          eventConfigName: "flowers",
           adjustments: []
         }}
         missedOptions={[
@@ -58,8 +60,9 @@ describe("EventSetInspector", () => {
           }
         ]}
         onSelectEvent={onSelectEvent}
-        onCreateSet={vi.fn()}
-        onUpdateSet={onUpdateSet}
+        onCreateEventConfig={vi.fn()}
+        onUpdateEventConfig={onUpdateEventConfig}
+        onDeleteEventConfig={vi.fn()}
         onCreateEvent={onCreateEvent}
         onSaveEvent={onSaveEvent}
         onDeleteEvent={onDeleteEvent}
@@ -70,11 +73,11 @@ describe("EventSetInspector", () => {
       />
     );
 
-    await user.clear(screen.getByLabelText("Set name"));
-    await user.type(screen.getByLabelText("Set name"), "flowers-updated");
-    await user.click(screen.getByRole("button", { name: "Save set" }));
-    expect(onUpdateSet).toHaveBeenCalledWith({
-      templateId: "template-1",
+    await user.clear(screen.getByLabelText("Event name"));
+    await user.type(screen.getByLabelText("Event name"), "flowers-updated");
+    await user.click(screen.getAllByRole("button", { name: "Save event" })[0]);
+    expect(onUpdateEventConfig).toHaveBeenCalledWith({
+      eventConfigId: "event-config-1",
       patch: {
         name: "flowers-updated",
         baseIntervalDays: 10,
@@ -83,14 +86,11 @@ describe("EventSetInspector", () => {
       }
     });
 
-    await user.type(screen.getByLabelText("Schedule new event for this set"), "2026-02-20T19:00");
+    await user.type(screen.getByLabelText("Schedule new event date"), "2026-02-20");
     await user.click(screen.getByRole("button", { name: "Add event" }));
     expect(onCreateEvent).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: /MISSED/ }));
-    expect(onSelectEvent).toHaveBeenCalledWith("event-1");
-
-    await user.click(screen.getByRole("button", { name: "Save event" }));
+    await user.click(screen.getAllByRole("button", { name: /^Save event$/ })[1]);
     expect(onSaveEvent).toHaveBeenCalledWith(
       "event-1",
       expect.objectContaining({ notes: expect.stringContaining("Missed") })
@@ -110,20 +110,21 @@ describe("EventSetInspector", () => {
     expect(onApplyMissedOption).toHaveBeenCalledWith("opt-1");
   });
 
-  it("creates a new set when none is selected", async () => {
+  it("creates a new event config when none is selected", async () => {
     const user = userEvent.setup();
-    const onCreateSet = vi.fn();
+    const onCreateEventConfig = vi.fn();
 
     render(
       <EventSetInspector
-        selectedSet={null}
-        eventsForCategory={[]}
-        upcomingForCategory={[]}
+        selectedEventConfig={null}
+        eventsForConfig={[]}
+        upcomingForConfig={[]}
         selectedEvent={null}
         missedOptions={[]}
         onSelectEvent={vi.fn()}
-        onCreateSet={onCreateSet}
-        onUpdateSet={vi.fn()}
+        onCreateEventConfig={onCreateEventConfig}
+        onUpdateEventConfig={vi.fn()}
+        onDeleteEventConfig={vi.fn()}
         onCreateEvent={vi.fn()}
         onSaveEvent={vi.fn()}
         onDeleteEvent={vi.fn()}
@@ -134,13 +135,11 @@ describe("EventSetInspector", () => {
       />
     );
 
-    await user.type(screen.getByLabelText("Set name"), "weekend trip");
-    await user.type(screen.getByLabelText("Category"), "trip");
-    await user.click(screen.getByRole("button", { name: "Create set" }));
+    await user.type(screen.getByLabelText("Event name"), "weekend trip");
+    await user.click(screen.getByRole("button", { name: "Create event" }));
 
-    expect(onCreateSet).toHaveBeenCalledWith({
+    expect(onCreateEventConfig).toHaveBeenCalledWith({
       name: "weekend trip",
-      category: "trip",
       baseIntervalDays: 7,
       jitterPct: 0.2
     });

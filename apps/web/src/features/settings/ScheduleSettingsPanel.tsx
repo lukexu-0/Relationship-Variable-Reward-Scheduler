@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
-import { BlackoutDatesEditor } from "./BlackoutDatesEditor";
+import { AllowedWindowsEditor } from "./AllowedWindowsEditor";
+import { BlackoutSelector } from "./BlackoutSelector";
 
 interface ScheduleSettingsPanelProps {
   profileId: string | null;
@@ -11,6 +12,7 @@ interface ScheduleSettingsPanelProps {
     reminderLeadHours: number;
     minGapHours: number;
     allowedWindows: Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>;
+    recurringBlackoutWeekdays: number[];
     blackoutDates: Array<{ startAt: string; endAt?: string; allDay?: boolean; note?: string }>;
   };
   onSave: (payload: {
@@ -18,6 +20,7 @@ interface ScheduleSettingsPanelProps {
     reminderLeadHours: number;
     minGapHours: number;
     allowedWindows: Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>;
+    recurringBlackoutWeekdays: number[];
     blackoutDates: Array<{ startAt: string; endAt?: string; allDay?: boolean; note?: string }>;
   }) => void;
   saving?: boolean;
@@ -27,43 +30,39 @@ export function ScheduleSettingsPanel({ profileId, settings, onSave, saving }: S
   const [timezone, setTimezone] = useState(settings.timezone);
   const [reminderLeadHours, setReminderLeadHours] = useState(24);
   const [minGapHours, setMinGapHours] = useState(24);
-  const [windowsJson, setWindowsJson] = useState(
-    '[{"weekday":1,"startLocalTime":"18:00","endLocalTime":"21:00"}]'
-  );
+  const [allowedWindows, setAllowedWindows] = useState<
+    Array<{ weekday: number; startLocalTime: string; endLocalTime: string }>
+  >([]);
+  const [recurringBlackoutWeekdays, setRecurringBlackoutWeekdays] = useState<number[]>([]);
   const [blackoutDates, setBlackoutDates] = useState<
     Array<{ startAt: string; endAt?: string; allDay?: boolean; note?: string }>
   >([]);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setTimezone(settings.timezone);
     setReminderLeadHours(settings.reminderLeadHours);
     setMinGapHours(settings.minGapHours);
-    setWindowsJson(JSON.stringify(settings.allowedWindows, null, 2));
+    setAllowedWindows(settings.allowedWindows);
+    setRecurringBlackoutWeekdays(settings.recurringBlackoutWeekdays);
     setBlackoutDates(settings.blackoutDates);
   }, [settings]);
 
   return (
-    <Card title="Schedule Settings" subtitle="Allowed windows, blackouts, timezone, and reminder lead-time">
+    <Card title="Schedule Settings" subtitle="Allowed windows, blackout rules, timezone, and reminder lead-time">
       {!profileId ? <p className="helper">Select a profile to configure scheduling.</p> : null}
 
       {profileId ? (
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            try {
-              setError(null);
-              const allowedWindows = JSON.parse(windowsJson);
-              onSave({
-                timezone,
-                reminderLeadHours,
-                minGapHours,
-                allowedWindows,
-                blackoutDates
-              });
-            } catch (mutationError) {
-              setError(mutationError instanceof Error ? mutationError.message : "Failed to save settings");
-            }
+            onSave({
+              timezone,
+              reminderLeadHours,
+              minGapHours,
+              allowedWindows,
+              recurringBlackoutWeekdays,
+              blackoutDates
+            });
           }}
         >
           <label htmlFor="timezone">Timezone</label>
@@ -99,20 +98,19 @@ export function ScheduleSettingsPanel({ profileId, settings, onSave, saving }: S
             </div>
           </div>
 
-          <label htmlFor="windows" style={{ marginTop: 8 }}>
-            Allowed windows JSON
-          </label>
-          <textarea
-            id="windows"
-            value={windowsJson}
-            onChange={(event) => setWindowsJson(event.target.value)}
-          />
-
           <div style={{ marginTop: 12 }}>
-            <BlackoutDatesEditor blackoutDates={blackoutDates} onChange={setBlackoutDates} />
+            <AllowedWindowsEditor allowedWindows={allowedWindows} onChange={setAllowedWindows} />
           </div>
 
-          {error ? <p style={{ color: "#8a2222" }}>{error}</p> : null}
+          <div style={{ marginTop: 12 }}>
+            <BlackoutSelector
+              recurringBlackoutWeekdays={recurringBlackoutWeekdays}
+              blackoutDates={blackoutDates}
+              onRecurringChange={setRecurringBlackoutWeekdays}
+              onDatesChange={setBlackoutDates}
+            />
+          </div>
+
           <div style={{ marginTop: 10 }}>
             <Button type="submit" disabled={saving}>
               Save settings

@@ -16,13 +16,12 @@ import { requireAuth } from "../middleware/auth.js";
 import { HttpError } from "../lib/http-error.js";
 import { parseOrThrow } from "../lib/zod.js";
 import { RewardEventModel, type RewardEventDocument } from "../models/reward-event.model.js";
-import { RewardTemplateModel } from "../models/reward-template.model.js";
+import { RewardEventConfigModel } from "../models/reward-event-config.model.js";
 import { ScheduleSettingsModel } from "../models/schedule-settings.model.js";
 import {
   ACTIVE_UPCOMING_STATUSES,
-  assertCategoryUpcomingUnique,
-  getCategoryFromTemplateId
-} from "../services/category-event-constraints.js";
+  assertEventConfigUpcomingUnique
+} from "../services/event-config-event-constraints.js";
 import { getOwnedProfile } from "../services/profile-access.js";
 import {
   getMissedOptions,
@@ -32,6 +31,7 @@ import {
   type SchedulerTemplatePayload
 } from "../services/scheduler-client.js";
 import { queueReminder, removeReminderJobsForEvent } from "../services/reminder-queue.js";
+import { enqueueProfileScheduleGeneration } from "../services/schedule-generation-queue.js";
 
 export const eventsRouter = Router();
 
@@ -66,28 +66,36 @@ eventsRouter.post(
     await getOwnedProfile(profileId, req.user!.id);
     const input = parseOrThrow(createEventSchema, req.body);
 
-    const template = await RewardTemplateModel.findOne({
-      _id: input.templateId,
+    const eventConfig = await RewardEventConfigModel.findOne({
+      _id: input.eventConfigId,
       profileId
     });
 
-    if (!template) {
-      throw new HttpError(404, "Template not found");
+    if (!eventConfig) {
+      throw new HttpError(404, "Event config not found");
     }
 
-    const scheduledAt = new Date(input.scheduledAt);
-    await assertCategoryUpcomingUnique({
+    const schedule = await resolveScheduledAt({
       profileId,
-      category: template.category,
-      scheduledAt,
+      scheduledDate: input.scheduledDate,
+      scheduledTime: input.scheduledTime
+    });
+
+    await assertEventConfigUpcomingUnique({
+      profileId,
+      eventConfigId: eventConfig.id,
+      scheduledAt: schedule.scheduledAt,
       status: "SCHEDULED"
     });
 
     const event = await RewardEventModel.create({
       profileId,
-      templateId: template.id,
-      scheduledAt,
-      originalScheduledAt: scheduledAt,
+      eventConfigId: eventConfig.id,
+      // Legacy compatibility field for older worker/email paths.
+      templateId: eventConfig.id,
+      scheduledAt: schedule.scheduledAt,
+      originalScheduledAt: schedule.scheduledAt,
+      hasExplicitTime: schedule.hasExplicitTime,
       status: "SCHEDULED",
       notes: input.notes,
       adjustments: []
@@ -107,33 +115,47 @@ eventsRouter.patch(
   asyncHandler(async (req, res) => {
     const input = parseOrThrow(updateEventSchema, req.body);
     const event = await getOwnedEvent(String(req.params.eventId), req.user!.id);
+    const eventConfigId = getEventConfigId(event);
 
     const currentScheduledAt = event.scheduledAt;
-    const nextScheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : currentScheduledAt;
-    const scheduledChanged = nextScheduledAt.getTime() !== currentScheduledAt.getTime();
+    const profileId = event.profileId.toString();
+    let scheduledChanged = false;
 
-    if (scheduledChanged && !input.reason) {
-      throw new HttpError(400, "A reason is required when changing scheduledAt");
+    if (input.scheduledDate || input.scheduledTime) {
+      const settings = await ScheduleSettingsModel.findOne({ profileId }).lean();
+      const timezone = settings?.timezone ?? "UTC";
+      const scheduledDate = input.scheduledDate ?? isoToDateString(currentScheduledAt, timezone);
+
+      const schedule = await resolveScheduledAt({
+        profileId,
+        scheduledDate,
+        scheduledTime: input.scheduledTime
+      });
+      scheduledChanged = schedule.scheduledAt.getTime() !== currentScheduledAt.getTime();
+
+      if (scheduledChanged) {
+        await assertEventConfigUpcomingUnique({
+          profileId,
+          eventConfigId,
+          scheduledAt: schedule.scheduledAt,
+          status: event.status,
+          excludeEventId: event.id
+        });
+
+        event.scheduledAt = schedule.scheduledAt;
+        event.hasExplicitTime = schedule.hasExplicitTime;
+        event.adjustments.push({
+          fromAt: currentScheduledAt,
+          toAt: schedule.scheduledAt,
+          reason: input.reason as string,
+          adjustedByUserId: req.user!.id,
+          adjustedAt: new Date()
+        });
+      }
     }
 
-    if (scheduledChanged) {
-      const category = await getCategoryFromTemplateId(event.templateId.toString());
-      await assertCategoryUpcomingUnique({
-        profileId: event.profileId.toString(),
-        category,
-        scheduledAt: nextScheduledAt,
-        status: event.status,
-        excludeEventId: event.id
-      });
-
-      event.scheduledAt = nextScheduledAt;
-      event.adjustments.push({
-        fromAt: currentScheduledAt,
-        toAt: nextScheduledAt,
-        reason: input.reason as string,
-        adjustedByUserId: req.user!.id,
-        adjustedAt: new Date()
-      });
+    if (scheduledChanged && !input.reason) {
+      throw new HttpError(400, "A reason is required when changing schedule date/time");
     }
 
     if (input.notes !== undefined) {
@@ -147,6 +169,7 @@ eventsRouter.patch(
         event,
         req.user!.reminderPreferences.reminderLeadHours
       );
+      await enqueueProfileScheduleGeneration(profileId).catch(() => undefined);
     }
 
     res.json({ event });
@@ -159,6 +182,9 @@ eventsRouter.delete(
     const event = await getOwnedEvent(String(req.params.eventId), req.user!.id);
     await removeReminderJobsForEvent(event.id);
     await event.deleteOne();
+
+    await enqueueProfileScheduleGeneration(event.profileId.toString()).catch(() => undefined);
+
     res.status(204).send();
   })
 );
@@ -168,6 +194,7 @@ eventsRouter.patch(
   asyncHandler(async (req, res) => {
     const input = parseOrThrow(completeEventSchema, req.body);
     const event = await getOwnedEvent(String(req.params.eventId), req.user!.id);
+    const eventConfigId = getEventConfigId(event);
 
     event.status = "COMPLETED";
     event.completedAt = new Date();
@@ -176,7 +203,12 @@ eventsRouter.patch(
     await event.save();
 
     await removeReminderJobsForEvent(event.id);
-    await tryRecomputeSchedulerState(event.profileId.toString(), event.templateId.toString(), input.sentimentLevel);
+    await tryRecomputeSchedulerState(
+      event.profileId.toString(),
+      eventConfigId,
+      input.sentimentLevel
+    );
+    await enqueueProfileScheduleGeneration(event.profileId.toString()).catch(() => undefined);
 
     res.json({ event });
   })
@@ -195,6 +227,7 @@ eventsRouter.patch(
 
     await removeReminderJobsForEvent(event.id);
     const options = await buildMissedOptions(event, req.user!.id);
+    await enqueueProfileScheduleGeneration(event.profileId.toString()).catch(() => undefined);
 
     res.json({ event, options });
   })
@@ -217,6 +250,7 @@ eventsRouter.post(
   asyncHandler(async (req, res) => {
     const input = parseOrThrow(applyMissedOptionSchema, req.body);
     const event = await getOwnedEvent(String(req.params.eventId), req.user!.id);
+    const eventConfigId = getEventConfigId(event);
     if (event.status !== "MISSED") {
       throw new HttpError(400, "Only missed events can apply missed options");
     }
@@ -230,11 +264,10 @@ eventsRouter.post(
     }
 
     const previousScheduledAt = event.scheduledAt;
-    const category = await getCategoryFromTemplateId(event.templateId.toString());
     const proposedAt = new Date(selected.proposedAt);
-    await assertCategoryUpcomingUnique({
+    await assertEventConfigUpcomingUnique({
       profileId: event.profileId.toString(),
-      category,
+      eventConfigId,
       scheduledAt: proposedAt,
       status: "RESCHEDULED",
       excludeEventId: event.id
@@ -242,6 +275,7 @@ eventsRouter.post(
 
     event.status = "RESCHEDULED";
     event.scheduledAt = proposedAt;
+    event.hasExplicitTime = true;
     event.adjustments.push({
       fromAt: previousScheduledAt,
       toAt: proposedAt,
@@ -255,6 +289,7 @@ eventsRouter.post(
       event,
       req.user!.reminderPreferences.reminderLeadHours
     );
+    await enqueueProfileScheduleGeneration(event.profileId.toString()).catch(() => undefined);
 
     res.json({ event, selectedOption: selected });
   })
@@ -265,23 +300,29 @@ eventsRouter.patch(
   asyncHandler(async (req, res) => {
     const input = parseOrThrow(rescheduleEventSchema, req.body);
     const event = await getOwnedEvent(String(req.params.eventId), req.user!.id);
+    const eventConfigId = getEventConfigId(event);
 
     const previousScheduledAt = event.scheduledAt;
-    const nextScheduledAt = new Date(input.scheduledAt);
-    const category = await getCategoryFromTemplateId(event.templateId.toString());
-    await assertCategoryUpcomingUnique({
+    const schedule = await resolveScheduledAt({
       profileId: event.profileId.toString(),
-      category,
-      scheduledAt: nextScheduledAt,
+      scheduledDate: input.scheduledDate,
+      scheduledTime: input.scheduledTime
+    });
+
+    await assertEventConfigUpcomingUnique({
+      profileId: event.profileId.toString(),
+      eventConfigId,
+      scheduledAt: schedule.scheduledAt,
       status: "RESCHEDULED",
       excludeEventId: event.id
     });
 
     event.status = "RESCHEDULED";
-    event.scheduledAt = nextScheduledAt;
+    event.scheduledAt = schedule.scheduledAt;
+    event.hasExplicitTime = schedule.hasExplicitTime;
     event.adjustments.push({
       fromAt: previousScheduledAt,
-      toAt: nextScheduledAt,
+      toAt: schedule.scheduledAt,
       reason: input.reason,
       adjustedByUserId: req.user!.id,
       adjustedAt: new Date()
@@ -292,6 +333,7 @@ eventsRouter.patch(
       event,
       req.user!.reminderPreferences.reminderLeadHours
     );
+    await enqueueProfileScheduleGeneration(event.profileId.toString()).catch(() => undefined);
 
     res.json({ event });
   })
@@ -313,15 +355,16 @@ async function buildMissedOptions(
 ): Promise<MissedRescheduleOption[]> {
   await getOwnedProfile(event.profileId.toString(), userId);
   const settingsDoc = await ScheduleSettingsModel.findOne({ profileId: event.profileId });
-  const templateDoc = await RewardTemplateModel.findById(event.templateId);
+  const eventConfigDoc = await RewardEventConfigModel.findById(getEventConfigId(event));
 
-  if (!settingsDoc || !templateDoc) {
-    throw new HttpError(400, "Missing settings or template for event");
+  if (!settingsDoc || !eventConfigDoc) {
+    throw new HttpError(400, "Missing settings or event config for event");
   }
 
+  const eventConfigId = getEventConfigId(event);
   const historyDocs = await RewardEventModel.find({
     profileId: event.profileId,
-    templateId: event.templateId
+    $or: [{ eventConfigId }, { templateId: eventConfigId }]
   })
     .sort({ scheduledAt: -1 })
     .limit(60)
@@ -335,6 +378,7 @@ async function buildMissedOptions(
       startLocalTime: window.startLocalTime,
       endLocalTime: window.endLocalTime
     })),
+    recurringBlackoutWeekdays: settingsDoc.recurringBlackoutWeekdays ?? [],
     blackoutDates: settingsDoc.blackoutDates.map((blackout) => ({
       startAt: blackout.startAt.toISOString(),
       endAt: blackout.endAt?.toISOString(),
@@ -343,11 +387,11 @@ async function buildMissedOptions(
     }))
   };
 
-  const template: SchedulerTemplatePayload = {
-    id: templateDoc.id,
-    name: templateDoc.name,
-    baseIntervalDays: templateDoc.baseIntervalDays,
-    jitterPct: templateDoc.jitterPct
+  const eventConfig: SchedulerTemplatePayload = {
+    id: eventConfigDoc.id,
+    name: eventConfigDoc.name,
+    baseIntervalDays: eventConfigDoc.baseIntervalDays,
+    jitterPct: eventConfigDoc.jitterPct
   };
 
   const eventHistory: SchedulerEventHistoryPayload[] = historyDocs.map((doc) => ({
@@ -364,7 +408,7 @@ async function buildMissedOptions(
     eventId: event.id,
     currentScheduledAt: event.scheduledAt.toISOString(),
     settings,
-    template,
+    eventConfig,
     eventHistory
   });
 
@@ -376,16 +420,16 @@ async function buildMissedOptions(
 
 async function tryRecomputeSchedulerState(
   profileId: string,
-  templateId: string,
+  eventConfigId: string,
   sentimentLevel: SentimentLevel
 ): Promise<void> {
   try {
     await recomputeSchedulerState({
       profileId,
       now: new Date().toISOString(),
-      templateSignals: [
+      eventConfigSignals: [
         {
-          templateId,
+          eventConfigId,
           status: "COMPLETED",
           sentimentLevel,
           completedAt: new Date().toISOString()
@@ -399,6 +443,89 @@ async function tryRecomputeSchedulerState(
 
 function deterministicSeed(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function getEventConfigId(event: RewardEventDocument): string {
+  const eventConfigId = event.eventConfigId?.toString() ?? event.templateId?.toString();
+  if (!eventConfigId) {
+    throw new HttpError(400, "Event is missing eventConfigId");
+  }
+
+  return eventConfigId;
+}
+
+interface ResolveScheduledAtInput {
+  profileId: string;
+  scheduledDate: string;
+  scheduledTime?: string;
+}
+
+async function resolveScheduledAt({
+  profileId,
+  scheduledDate,
+  scheduledTime
+}: ResolveScheduledAtInput): Promise<{ scheduledAt: Date; hasExplicitTime: boolean }> {
+  const settings = await ScheduleSettingsModel.findOne({ profileId }).lean();
+  const timezone = settings?.timezone ?? "UTC";
+
+  let effectiveTime = scheduledTime;
+  let hasExplicitTime = Boolean(scheduledTime);
+
+  if (!effectiveTime) {
+    const weekday = weekdayFromDateString(scheduledDate);
+    const allowedWindows = (settings?.allowedWindows ?? [])
+      .filter((window) => window.weekday === weekday)
+      .sort((left, right) => left.startLocalTime.localeCompare(right.startLocalTime));
+
+    effectiveTime = allowedWindows[0]?.startLocalTime ?? "09:00";
+    hasExplicitTime = false;
+  }
+
+  return {
+    scheduledAt: zonedDateTimeToUtc(scheduledDate, effectiveTime, timezone),
+    hasExplicitTime
+  };
+}
+
+function weekdayFromDateString(dateString: string): number {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
+}
+
+function zonedDateTimeToUtc(dateString: string, timeString: string, timezone: string): Date {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const [hour, minute] = timeString.split(":").map(Number);
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+
+  try {
+    const zoned = new Date(utcGuess.toLocaleString("en-US", { timeZone: timezone }));
+    const diffMs = utcGuess.getTime() - zoned.getTime();
+    return new Date(utcGuess.getTime() + diffMs);
+  } catch {
+    return utcGuess;
+  }
+}
+
+function isoToDateString(value: Date, timezone: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+
+    const parts = formatter.formatToParts(value);
+    const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+    const month = parts.find((part) => part.type === "month")?.value ?? "01";
+    const day = parts.find((part) => part.type === "day")?.value ?? "01";
+    return `${year}-${month}-${day}`;
+  } catch {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(value.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
 }
 
 async function syncReminderForEvent(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 SentimentLevel = Literal["VERY_POOR", "POOR", "NEUTRAL", "WELL", "VERY_WELL"]
 EventStatus = Literal["SCHEDULED", "COMPLETED", "MISSED", "RESCHEDULED", "CANCELED"]
@@ -26,10 +26,11 @@ class SchedulerSettings(BaseModel):
     timezone: str
     minGapHours: int = Field(ge=1, le=720)
     allowedWindows: list[DateWindow] = Field(default_factory=list)
+    recurringBlackoutWeekdays: list[int] = Field(default_factory=list)
     blackoutDates: list[BlackoutDate] = Field(default_factory=list)
 
 
-class SchedulerTemplate(BaseModel):
+class SchedulerEventConfig(BaseModel):
     id: str
     name: str
     baseIntervalDays: float = Field(gt=0)
@@ -47,7 +48,7 @@ class EventHistoryItem(BaseModel):
 class RecommendNextRequest(BaseModel):
     seed: str
     now: datetime
-    template: SchedulerTemplate
+    eventConfig: SchedulerEventConfig = Field(validation_alias=AliasChoices("eventConfig", "template"))
     settings: SchedulerSettings
     eventHistory: list[EventHistoryItem] = Field(default_factory=list)
 
@@ -62,7 +63,7 @@ class MissedOptionsRequest(BaseModel):
     now: datetime
     eventId: str
     currentScheduledAt: datetime
-    template: SchedulerTemplate
+    eventConfig: SchedulerEventConfig = Field(validation_alias=AliasChoices("eventConfig", "template"))
     settings: SchedulerSettings
     eventHistory: list[EventHistoryItem] = Field(default_factory=list)
 
@@ -82,7 +83,7 @@ class MissedOptionsResponse(BaseModel):
 
 
 class SchedulerSignal(BaseModel):
-    templateId: str
+    eventConfigId: str = Field(validation_alias=AliasChoices("eventConfigId", "templateId"))
     sentimentLevel: SentimentLevel | None = None
     status: EventStatus
     completedAt: datetime | None = None
@@ -91,7 +92,9 @@ class SchedulerSignal(BaseModel):
 class RecomputeStateRequest(BaseModel):
     profileId: str
     now: datetime
-    templateSignals: list[SchedulerSignal]
+    eventConfigSignals: list[SchedulerSignal] = Field(
+        validation_alias=AliasChoices("eventConfigSignals", "templateSignals")
+    )
 
 
 class RecomputeStateResponse(BaseModel):

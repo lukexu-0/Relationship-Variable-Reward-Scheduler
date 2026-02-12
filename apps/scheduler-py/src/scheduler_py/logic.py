@@ -26,15 +26,21 @@ SENTIMENT_WEIGHTS = {
 
 def recommend_next_time(req: RecommendNextRequest) -> tuple[datetime, str]:
     rng = random.Random(req.seed)
-    base_interval = req.template.baseIntervalDays
+    base_interval = req.eventConfig.baseIntervalDays
     adaptive_interval = compute_adaptive_interval_days(base_interval, req.eventHistory)
-    jitter_range = adaptive_interval * req.template.jitterPct
+    jitter_range = adaptive_interval * req.eventConfig.jitterPct
     jitter = rng.uniform(-jitter_range, jitter_range)
 
     now_utc = ensure_utc(req.now)
     candidate = now_utc + timedelta(days=max(adaptive_interval + jitter, 0.25))
     candidate = enforce_min_gap(candidate, req.settings.minGapHours, req.eventHistory)
-    candidate = next_valid_slot(candidate, req.settings.timezone, req.settings.allowedWindows, req.settings.blackoutDates)
+    candidate = next_valid_slot(
+        candidate,
+        req.settings.timezone,
+        req.settings.allowedWindows,
+        req.settings.recurringBlackoutWeekdays,
+        req.settings.blackoutDates,
+    )
 
     rationale = (
         f"base_interval={base_interval:.2f}d, adaptive_interval={adaptive_interval:.2f}d, "
@@ -50,20 +56,22 @@ def build_missed_options(req: MissedOptionsRequest) -> list[MissedOption]:
         asap_candidate,
         req.settings.timezone,
         req.settings.allowedWindows,
+        req.settings.recurringBlackoutWeekdays,
         req.settings.blackoutDates,
     )
 
-    interval_days = compute_adaptive_interval_days(req.template.baseIntervalDays, req.eventHistory)
+    interval_days = compute_adaptive_interval_days(req.eventConfig.baseIntervalDays, req.eventHistory)
     delayed_target = now_utc + timedelta(days=max(interval_days, 0.25))
     delayed_target = enforce_min_gap(delayed_target, req.settings.minGapHours, req.eventHistory)
     delayed_slot = next_valid_slot(
         delayed_target,
         req.settings.timezone,
         req.settings.allowedWindows,
+        req.settings.recurringBlackoutWeekdays,
         req.settings.blackoutDates,
     )
 
-    urgency = compute_urgency(req.eventHistory, req.template.baseIntervalDays, now_utc)
+    urgency = compute_urgency(req.eventHistory, req.eventConfig.baseIntervalDays, now_utc)
     recommend_asap = urgency >= 0.5
 
     asap_option = MissedOption(
@@ -91,7 +99,7 @@ def build_missed_options(req: MissedOptionsRequest) -> list[MissedOption]:
 
 def recompute_sentiment_score(req: RecomputeStateRequest) -> float:
     weights: list[float] = []
-    for signal in req.templateSignals:
+    for signal in req.eventConfigSignals:
         if signal.sentimentLevel:
             weights.append(SENTIMENT_WEIGHTS[signal.sentimentLevel])
 
@@ -151,13 +159,17 @@ def next_valid_slot(
     candidate_utc: datetime,
     timezone_name: str,
     windows: list,
+    recurring_blackout_weekdays: list,
     blackouts: list,
 ) -> datetime:
     tz = ZoneInfo(timezone_name)
     local_candidate = ensure_utc(candidate_utc).astimezone(tz)
 
+    if is_all_weekdays_blocked(windows, recurring_blackout_weekdays):
+        raise ValueError("No schedulable windows because recurring blackouts cover all weekdays")
+
     if not windows:
-        return step_out_of_blackout(local_candidate, blackouts).astimezone(UTC)
+        return step_out_of_blackout(local_candidate, recurring_blackout_weekdays, blackouts).astimezone(UTC)
 
     grouped = {}
     for window in windows:
@@ -166,7 +178,7 @@ def next_valid_slot(
     for day_offset in range(0, 370):
         probe_date = (local_candidate + timedelta(days=day_offset)).date()
         day_windows = sorted(
-            grouped.get(probe_date.weekday(), []),
+            grouped.get(weekday_sunday_zero(probe_date), []),
             key=lambda item: item.startLocalTime,
         )
 
@@ -181,17 +193,21 @@ def next_valid_slot(
             if candidate_for_window > end_local:
                 continue
 
-            candidate_for_window = step_out_of_blackout(candidate_for_window, blackouts)
+            candidate_for_window = step_out_of_blackout(
+                candidate_for_window,
+                recurring_blackout_weekdays,
+                blackouts,
+            )
             if candidate_for_window <= end_local and candidate_for_window.date() == probe_date:
                 return candidate_for_window.astimezone(UTC)
 
     return local_candidate.astimezone(UTC)
 
 
-def step_out_of_blackout(local_dt: datetime, blackouts: list) -> datetime:
+def step_out_of_blackout(local_dt: datetime, recurring_blackout_weekdays: list, blackouts: list) -> datetime:
     cursor = local_dt
     for _ in range(0, 100):
-        hit = find_blackout_hit(cursor, blackouts)
+        hit = find_blackout_hit(cursor, recurring_blackout_weekdays, blackouts)
         if hit is None:
             return cursor
         cursor = hit + timedelta(minutes=30)
@@ -199,7 +215,10 @@ def step_out_of_blackout(local_dt: datetime, blackouts: list) -> datetime:
     return cursor
 
 
-def find_blackout_hit(local_dt: datetime, blackouts: list) -> datetime | None:
+def find_blackout_hit(local_dt: datetime, recurring_blackout_weekdays: list, blackouts: list) -> datetime | None:
+    if weekday_sunday_zero(local_dt.date()) in recurring_blackout_weekdays:
+        return datetime.combine(local_dt.date(), time(23, 59), local_dt.tzinfo)
+
     for blackout in blackouts:
         start = blackout.startAt.astimezone(local_dt.tzinfo)
         end = (blackout.endAt or blackout.startAt).astimezone(local_dt.tzinfo)
@@ -214,6 +233,20 @@ def find_blackout_hit(local_dt: datetime, blackouts: list) -> datetime | None:
                 return end
 
     return None
+
+
+def is_all_weekdays_blocked(windows: list, recurring_blackout_weekdays: list) -> bool:
+    blocked = set(recurring_blackout_weekdays)
+    if not windows:
+        return len(blocked) == 7
+
+    window_days = {window.weekday for window in windows}
+    return window_days.issubset(blocked)
+
+
+def weekday_sunday_zero(value) -> int:
+    # Python weekday: Monday=0 ... Sunday=6; app contracts use Sunday=0 ... Saturday=6.
+    return (value.weekday() + 1) % 7
 
 
 def compute_urgency(

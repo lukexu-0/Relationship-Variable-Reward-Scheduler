@@ -8,7 +8,7 @@ const {
   idempotencyCreateMock,
   profileFindByIdMock,
   eventFindByIdMock,
-  templateFindByIdMock,
+  eventConfigFindByIdMock,
   userFindByIdMock
 } = vi.hoisted(() => ({
   sendReminderEmailMock: vi.fn(),
@@ -17,7 +17,7 @@ const {
   idempotencyCreateMock: vi.fn(),
   profileFindByIdMock: vi.fn(),
   eventFindByIdMock: vi.fn(),
-  templateFindByIdMock: vi.fn(),
+  eventConfigFindByIdMock: vi.fn(),
   userFindByIdMock: vi.fn()
 }));
 
@@ -50,9 +50,9 @@ vi.mock("../models/reward-event.model.js", () => ({
   }
 }));
 
-vi.mock("../models/reward-template.model.js", () => ({
-  RewardTemplateModel: {
-    findById: templateFindByIdMock
+vi.mock("../models/reward-event-config.model.js", () => ({
+  RewardEventConfigModel: {
+    findById: eventConfigFindByIdMock
   }
 }));
 
@@ -71,12 +71,12 @@ describe("email-reminder worker", () => {
     eventFindByIdMock.mockResolvedValue({
       id: "event-1",
       profileId: "profile-1",
-      templateId: "template-1",
+      eventConfigId: "event-config-1",
       status: "SCHEDULED",
       scheduledAt: new Date("2026-01-10T20:00:00.000Z")
     });
     profileFindByIdMock.mockResolvedValue({ id: "profile-1", userId: "user-1", profileName: "Main" });
-    templateFindByIdMock.mockResolvedValue({ id: "template-1", name: "flowers" });
+    eventConfigFindByIdMock.mockResolvedValue({ id: "event-config-1", name: "flowers" });
     userFindByIdMock.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
@@ -105,7 +105,7 @@ describe("email-reminder worker", () => {
     eventFindByIdMock.mockResolvedValue({
       id: "event-1",
       profileId: "profile-1",
-      templateId: "template-1",
+      eventConfigId: "event-config-1",
       status: "COMPLETED",
       scheduledAt: new Date("2026-01-10T20:00:00.000Z")
     });

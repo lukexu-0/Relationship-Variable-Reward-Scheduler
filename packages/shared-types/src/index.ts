@@ -45,11 +45,11 @@ export interface MissedRescheduleOption {
   recommended: boolean;
 }
 
-export interface RewardTemplate {
+export interface RewardEventConfig {
   id: string;
   profileId: string;
   name: string;
-  category: string;
+  slug: string;
   baseIntervalDays: number;
   jitterPct: number;
   enabled: boolean;
@@ -63,6 +63,7 @@ export interface ScheduleSettings {
   timezone: string;
   reminderLeadHours: number;
   allowedWindows: DateWindow[];
+  recurringBlackoutWeekdays: Array<0 | 1 | 2 | 3 | 4 | 5 | 6>;
   blackoutDates: BlackoutDate[];
   minGapHours: number;
   createdAt: string;
@@ -72,9 +73,10 @@ export interface ScheduleSettings {
 export interface RewardEvent {
   id: string;
   profileId: string;
-  templateId: string;
+  eventConfigId: string;
   scheduledAt: string;
   originalScheduledAt: string;
+  hasExplicitTime: boolean;
   status: EventStatus;
   completedAt?: string;
   missedAt?: string;
@@ -85,8 +87,8 @@ export interface RewardEvent {
   updatedAt: string;
 }
 
-export interface SchedulerTemplateState {
-  templateId: string;
+export interface SchedulerEventConfigState {
+  eventConfigId: string;
   rollingSentimentScore: number;
   avgCompletionLagHours: number;
   lastScheduledAt?: string;
@@ -96,7 +98,7 @@ export interface SchedulerTemplateState {
 export interface SchedulerState {
   id: string;
   profileId: string;
-  perTemplate: SchedulerTemplateState[];
+  perEventConfig: SchedulerEventConfigState[];
   updatedAt: string;
 }
 
@@ -116,29 +118,32 @@ export interface QueueJobPayloadMap {
   "event-followups": { eventId: string; reason: string };
 }
 
-export const DEFAULT_TEMPLATES = [
+export const DEFAULT_EVENT_CONFIGS = [
   {
-    name: "flowers",
-    category: "gift",
+    name: "Flowers",
+    slug: "flowers",
     baseIntervalDays: 14,
     jitterPct: 0.25
   },
   {
-    name: "nice_date",
-    category: "date",
+    name: "Date Night",
+    slug: "date-night",
     baseIntervalDays: 10,
     jitterPct: 0.2
   },
   {
-    name: "activity",
-    category: "activity",
+    name: "Shared Activity",
+    slug: "shared-activity",
     baseIntervalDays: 7,
     jitterPct: 0.2
   },
   {
-    name: "thoughtful_message",
-    category: "message",
+    name: "Thoughtful Message",
+    slug: "thoughtful-message",
     baseIntervalDays: 4,
     jitterPct: 0.15
   }
 ] as const;
+
+// Backward compatibility for internal migration code paths while routes move to event configs.
+export const DEFAULT_TEMPLATES = DEFAULT_EVENT_CONFIGS;

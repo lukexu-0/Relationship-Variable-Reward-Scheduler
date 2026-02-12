@@ -5,10 +5,10 @@ import { Button } from "../../components/ui/Button";
 import { formatIsoToLocal } from "../../lib/time/format";
 import { EventEditor } from "../events/EventEditor";
 
-interface TemplateSet {
+interface EventConfigRecord {
   _id: string;
   name: string;
-  category: string;
+  slug: string;
   baseIntervalDays: number;
   jitterPct: number;
   enabled: boolean;
@@ -20,7 +20,8 @@ interface EventRecord {
   notes?: string;
   scheduledAt: string;
   originalScheduledAt: string;
-  templateName: string;
+  hasExplicitTime: boolean;
+  eventConfigName: string;
   adjustments: Array<{
     fromAt: string;
     toAt: string;
@@ -38,45 +39,50 @@ interface MissedOption {
 }
 
 interface EventSetInspectorProps {
-  selectedSet: TemplateSet | null;
-  eventsForCategory: EventRecord[];
-  upcomingForCategory: EventRecord[];
+  selectedEventConfig: EventConfigRecord | null;
+  eventsForConfig: EventRecord[];
+  upcomingForConfig: EventRecord[];
   selectedEvent: EventRecord | null;
   missedOptions: MissedOption[];
   onSelectEvent: (eventId: string) => void;
-  onCreateSet: (payload: {
+  onCreateEventConfig: (payload: {
     name: string;
-    category: string;
     baseIntervalDays: number;
     jitterPct: number;
   }) => void;
-  onUpdateSet: (payload: {
-    templateId: string;
+  onUpdateEventConfig: (payload: {
+    eventConfigId: string;
     patch: Partial<{ name: string; baseIntervalDays: number; jitterPct: number; enabled: boolean }>;
   }) => void;
-  onCreateEvent: (payload: { scheduledAt: string; notes?: string }) => void;
-  onSaveEvent: (eventId: string, payload: { scheduledAt?: string; notes?: string; reason?: string }) => void;
+  onDeleteEventConfig: (eventConfigId: string) => void;
+  onCreateEvent: (payload: { scheduledDate: string; scheduledTime?: string; notes?: string }) => void;
+  onSaveEvent: (
+    eventId: string,
+    payload: { scheduledDate?: string; scheduledTime?: string; notes?: string; reason?: string }
+  ) => void;
   onDeleteEvent: (eventId: string) => void;
   onCompleteEvent: (eventId: string) => void;
   onMissEvent: (eventId: string) => void;
   onRescheduleEventPlusDay: (eventId: string) => void;
   onApplyMissedOption: (optionId: string) => void;
-  creatingSet?: boolean;
-  updatingSet?: boolean;
+  creatingEventConfig?: boolean;
+  updatingEventConfig?: boolean;
+  deletingEventConfig?: boolean;
   creatingEvent?: boolean;
   savingEvent?: boolean;
   deletingEvent?: boolean;
 }
 
 export function EventSetInspector({
-  selectedSet,
-  eventsForCategory,
-  upcomingForCategory,
+  selectedEventConfig,
+  eventsForConfig,
+  upcomingForConfig,
   selectedEvent,
   missedOptions,
   onSelectEvent,
-  onCreateSet,
-  onUpdateSet,
+  onCreateEventConfig,
+  onUpdateEventConfig,
+  onDeleteEventConfig,
   onCreateEvent,
   onSaveEvent,
   onDeleteEvent,
@@ -84,49 +90,50 @@ export function EventSetInspector({
   onMissEvent,
   onRescheduleEventPlusDay,
   onApplyMissedOption,
-  creatingSet,
-  updatingSet,
+  creatingEventConfig,
+  updatingEventConfig,
+  deletingEventConfig,
   creatingEvent,
   savingEvent,
   deletingEvent
 }: EventSetInspectorProps) {
-  const [setName, setSetName] = useState("");
-  const [setCategory, setSetCategory] = useState("");
-  const [setBaseIntervalDays, setSetBaseIntervalDays] = useState(7);
-  const [setJitterPct, setSetJitterPct] = useState(0.2);
-  const [setEnabled, setSetEnabled] = useState(true);
+  const [configName, setConfigName] = useState("");
+  const [configBaseIntervalDays, setConfigBaseIntervalDays] = useState(7);
+  const [configJitterPct, setConfigJitterPct] = useState(0.2);
+  const [configEnabled, setConfigEnabled] = useState(true);
+
   const [newEventDate, setNewEventDate] = useState("");
+  const [newEventUseTime, setNewEventUseTime] = useState(false);
+  const [newEventTime, setNewEventTime] = useState("18:00");
   const [newEventNotes, setNewEventNotes] = useState("");
 
   useEffect(() => {
-    if (!selectedSet) {
-      setSetName("");
-      setSetCategory("");
-      setSetBaseIntervalDays(7);
-      setSetJitterPct(0.2);
-      setSetEnabled(true);
+    if (!selectedEventConfig) {
+      setConfigName("");
+      setConfigBaseIntervalDays(7);
+      setConfigJitterPct(0.2);
+      setConfigEnabled(true);
       return;
     }
 
-    setSetName(selectedSet.name);
-    setSetCategory(selectedSet.category);
-    setSetBaseIntervalDays(selectedSet.baseIntervalDays);
-    setSetJitterPct(selectedSet.jitterPct);
-    setSetEnabled(selectedSet.enabled);
-  }, [selectedSet]);
+    setConfigName(selectedEventConfig.name);
+    setConfigBaseIntervalDays(selectedEventConfig.baseIntervalDays);
+    setConfigJitterPct(selectedEventConfig.jitterPct);
+    setConfigEnabled(selectedEventConfig.enabled);
+  }, [selectedEventConfig]);
 
   return (
     <div className="set-inspector">
-      <h3>Set Inspector</h3>
+      <h3>Event Builder</h3>
 
-      {!selectedSet ? (
-        <p className="helper">Select a set from the left list, or create a new category set here.</p>
+      {!selectedEventConfig ? (
+        <p className="helper">Select an event from the left list, or create a new one here.</p>
       ) : (
         <>
-          <p className="helper">Selected category: {selectedSet.category}</p>
+          <p className="helper">Selected: {selectedEventConfig.name}</p>
           <div className="row" style={{ marginBottom: 8 }}>
-            <Badge variant="accent">{upcomingForCategory.length} upcoming</Badge>
-            <Badge>{eventsForCategory.length} events</Badge>
+            <Badge variant="accent">{upcomingForConfig.length} upcoming</Badge>
+            <Badge>{eventsForConfig.length} events</Badge>
           </div>
         </>
       )}
@@ -134,87 +141,90 @@ export function EventSetInspector({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!selectedSet) {
-            onCreateSet({
-              name: setName,
-              category: setCategory,
-              baseIntervalDays: setBaseIntervalDays,
-              jitterPct: setJitterPct
+          if (!selectedEventConfig) {
+            onCreateEventConfig({
+              name: configName,
+              baseIntervalDays: configBaseIntervalDays,
+              jitterPct: configJitterPct
             });
             return;
           }
 
-          onUpdateSet({
-            templateId: selectedSet._id,
+          onUpdateEventConfig({
+            eventConfigId: selectedEventConfig._id,
             patch: {
-              name: setName,
-              baseIntervalDays: setBaseIntervalDays,
-              jitterPct: setJitterPct,
-              enabled: setEnabled
+              name: configName,
+              baseIntervalDays: configBaseIntervalDays,
+              jitterPct: configJitterPct,
+              enabled: configEnabled
             }
           });
         }}
       >
-        <label htmlFor="setName">Set name</label>
-        <input id="setName" value={setName} onChange={(event) => setSetName(event.target.value)} required />
-
-        <label htmlFor="setCategory" style={{ marginTop: 8 }}>
-          Category
-        </label>
-        <input
-          id="setCategory"
-          value={setCategory}
-          onChange={(event) => setSetCategory(event.target.value)}
-          required
-          disabled={Boolean(selectedSet)}
-        />
+        <label htmlFor="configName">Event name</label>
+        <input id="configName" value={configName} onChange={(event) => setConfigName(event.target.value)} required />
 
         <div className="row" style={{ marginTop: 8 }}>
           <div style={{ flex: 1 }}>
-            <label htmlFor="setBaseIntervalDays">Base interval days</label>
+            <label htmlFor="configBaseIntervalDays">Base interval days</label>
             <input
-              id="setBaseIntervalDays"
+              id="configBaseIntervalDays"
               type="number"
               min={1}
               max={365}
-              value={setBaseIntervalDays}
-              onChange={(event) => setSetBaseIntervalDays(Number(event.target.value))}
+              value={configBaseIntervalDays}
+              onChange={(event) => setConfigBaseIntervalDays(Number(event.target.value))}
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label htmlFor="setJitterPct">Jitter pct</label>
+            <label htmlFor="configJitterPct" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Jitter pct
+              <span className="hint-tooltip" title="Jitter adds random variation to spacing around the base interval so events feel less predictable.">
+                ?
+              </span>
+            </label>
             <input
-              id="setJitterPct"
+              id="configJitterPct"
               type="number"
               min={0}
               max={0.9}
               step={0.05}
-              value={setJitterPct}
-              onChange={(event) => setSetJitterPct(Number(event.target.value))}
+              value={configJitterPct}
+              onChange={(event) => setConfigJitterPct(Number(event.target.value))}
             />
           </div>
         </div>
 
-        <label htmlFor="setEnabled" style={{ marginTop: 8 }}>
+        <label htmlFor="configEnabled" style={{ marginTop: 8 }}>
           Enabled
         </label>
         <select
-          id="setEnabled"
-          value={setEnabled ? "true" : "false"}
-          onChange={(event) => setSetEnabled(event.target.value === "true")}
+          id="configEnabled"
+          value={configEnabled ? "true" : "false"}
+          onChange={(event) => setConfigEnabled(event.target.value === "true")}
         >
           <option value="true">Enabled</option>
           <option value="false">Disabled</option>
         </select>
 
-        <div style={{ marginTop: 10 }}>
-          <Button type="submit" disabled={creatingSet || updatingSet}>
-            {selectedSet ? "Save set" : "Create set"}
+        <div className="row" style={{ marginTop: 10 }}>
+          <Button type="submit" disabled={creatingEventConfig || updatingEventConfig}>
+            {selectedEventConfig ? "Save event" : "Create event"}
           </Button>
+          {selectedEventConfig ? (
+            <Button
+              type="button"
+              variant="danger"
+              disabled={deletingEventConfig}
+              onClick={() => onDeleteEventConfig(selectedEventConfig._id)}
+            >
+              Delete event config
+            </Button>
+          ) : null}
         </div>
       </form>
 
-      {selectedSet ? (
+      {selectedEventConfig ? (
         <>
           <hr style={{ borderColor: "var(--line)", opacity: 0.5 }} />
 
@@ -222,19 +232,46 @@ export function EventSetInspector({
             onSubmit={(event) => {
               event.preventDefault();
               onCreateEvent({
-                scheduledAt: localDateTimeToIso(newEventDate),
+                scheduledDate: newEventDate,
+                scheduledTime: newEventUseTime ? newEventTime : undefined,
                 notes: newEventNotes || undefined
               });
             }}
           >
-            <label htmlFor="setEventDate">Schedule new event for this set</label>
+            <label htmlFor="setEventDate">Schedule new event date</label>
             <input
               id="setEventDate"
-              type="datetime-local"
+              type="date"
               value={newEventDate}
               onChange={(event) => setNewEventDate(event.target.value)}
               required
             />
+
+            <label htmlFor="setEventUseTime" style={{ marginTop: 8 }}>
+              Include time
+            </label>
+            <select
+              id="setEventUseTime"
+              value={newEventUseTime ? "yes" : "no"}
+              onChange={(event) => setNewEventUseTime(event.target.value === "yes")}
+            >
+              <option value="no">No (date only)</option>
+              <option value="yes">Yes</option>
+            </select>
+
+            {newEventUseTime ? (
+              <>
+                <label htmlFor="setEventTime" style={{ marginTop: 8 }}>
+                  Time
+                </label>
+                <input
+                  id="setEventTime"
+                  type="time"
+                  value={newEventTime}
+                  onChange={(event) => setNewEventTime(event.target.value)}
+                />
+              </>
+            ) : null}
 
             <label htmlFor="setEventNotes" style={{ marginTop: 8 }}>
               Event notes (optional)
@@ -253,30 +290,15 @@ export function EventSetInspector({
           </form>
 
           <div style={{ marginTop: 12 }}>
-            <strong>Upcoming dates</strong>
-            {upcomingForCategory.length === 0 ? <p className="helper">No upcoming events in this category.</p> : null}
-            {upcomingForCategory.map((event) => (
-              <button
-                key={event._id}
-                type="button"
-                className="event-choice"
-                onClick={() => onSelectEvent(event._id)}
-              >
-                {formatIsoToLocal(event.scheduledAt)}
-              </button>
-            ))}
-          </div>
-
-          <div style={{ marginTop: 12 }}>
             <strong>Event history</strong>
-            {eventsForCategory.map((event) => (
+            {eventsForConfig.map((event) => (
               <button
                 key={event._id}
                 type="button"
                 className={`event-choice ${selectedEvent?._id === event._id ? "active" : ""}`}
                 onClick={() => onSelectEvent(event._id)}
               >
-                <span>{formatIsoToLocal(event.scheduledAt)}</span>
+                <span>{formatIsoToLocal(event.scheduledAt, event.hasExplicitTime)}</span>
                 <span>{event.status}</span>
               </button>
             ))}
@@ -342,13 +364,4 @@ export function EventSetInspector({
       ) : null}
     </div>
   );
-}
-
-function localDateTimeToIso(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toISOString();
 }

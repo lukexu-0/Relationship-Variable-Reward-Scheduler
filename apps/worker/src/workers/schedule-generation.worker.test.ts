@@ -5,7 +5,7 @@ const {
   profileFindMock,
   profileFindByIdMock,
   settingsFindOneMock,
-  templateFindMock,
+  eventConfigFindMock,
   eventFindOneMock,
   eventFindMock,
   eventCreateMock,
@@ -14,7 +14,7 @@ const {
   profileFindMock: vi.fn(),
   profileFindByIdMock: vi.fn(),
   settingsFindOneMock: vi.fn(),
-  templateFindMock: vi.fn(),
+  eventConfigFindMock: vi.fn(),
   eventFindOneMock: vi.fn(),
   eventFindMock: vi.fn(),
   eventCreateMock: vi.fn(),
@@ -34,9 +34,9 @@ vi.mock("../models/schedule-settings.model.js", () => ({
   }
 }));
 
-vi.mock("../models/reward-template.model.js", () => ({
-  RewardTemplateModel: {
-    find: templateFindMock
+vi.mock("../models/reward-event-config.model.js", () => ({
+  RewardEventConfigModel: {
+    find: eventConfigFindMock
   }
 }));
 
@@ -64,6 +64,7 @@ describe("schedule-generation worker", () => {
       minGapHours: 24,
       reminderLeadHours: 24,
       allowedWindows: [{ weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" }],
+      recurringBlackoutWeekdays: [],
       blackoutDates: [
         {
           startAt: new Date("2026-01-12T00:00:00.000Z"),
@@ -74,11 +75,11 @@ describe("schedule-generation worker", () => {
       ]
     });
 
-    templateFindMock.mockReturnValue(
+    eventConfigFindMock.mockReturnValue(
       makeLeanChain([
         {
-          _id: "template-1",
-          category: "gift",
+          _id: "event-config-1",
+          slug: "flowers",
           name: "flowers",
           baseIntervalDays: 7,
           jitterPct: 0.2,
@@ -124,6 +125,7 @@ describe("schedule-generation worker", () => {
     expect(recommendNextScheduleMock.mock.calls[0]?.[0]).toMatchObject({
       settings: {
         allowedWindows: [{ weekday: 1, startLocalTime: "18:00", endLocalTime: "21:00" }],
+        recurringBlackoutWeekdays: [],
         blackoutDates: [{ allDay: true, note: "anniversary trip" }]
       },
       eventHistory: [{ status: "COMPLETED", sentimentLevel: "WELL" }]
@@ -136,7 +138,7 @@ describe("schedule-generation worker", () => {
     expect(options.jobId.startsWith("event-1:")).toBe(true);
   });
 
-  it("skips template when there is already an upcoming event", async () => {
+  it("skips event config when there is already an upcoming event", async () => {
     profileFindByIdMock.mockResolvedValue({ id: "profile-1", active: true });
     eventFindOneMock.mockResolvedValue({ _id: "existing-event" });
 
@@ -166,25 +168,17 @@ describe("schedule-generation worker", () => {
     expect(addMock).not.toHaveBeenCalled();
   });
 
-  it("schedules once per category even when multiple templates share a category", async () => {
+  it("schedules once per enabled event config", async () => {
     profileFindByIdMock.mockResolvedValue({ id: "profile-1", active: true });
-    templateFindMock.mockReturnValue(
+    eventConfigFindMock.mockReturnValue(
       makeLeanChain([
         {
-          _id: "template-newest",
-          category: "gift",
+          _id: "event-config-newest",
+          slug: "flowers",
           name: "flowers-new",
           baseIntervalDays: 7,
           jitterPct: 0.2,
           createdAt: new Date("2026-01-03T00:00:00.000Z")
-        },
-        {
-          _id: "template-older",
-          category: "gift",
-          name: "flowers-old",
-          baseIntervalDays: 9,
-          jitterPct: 0.2,
-          createdAt: new Date("2026-01-01T00:00:00.000Z")
         }
       ])
     );
@@ -201,7 +195,7 @@ describe("schedule-generation worker", () => {
 
     expect(recommendNextScheduleMock).toHaveBeenCalledTimes(1);
     expect(eventCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ templateId: "template-newest" })
+      expect.objectContaining({ eventConfigId: "event-config-newest" })
     );
     expect(addMock).toHaveBeenCalledTimes(1);
   });

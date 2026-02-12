@@ -6,7 +6,7 @@ import { pino } from "pino";
 
 import { ProfileModel } from "../models/profile.model.js";
 import { RewardEventModel } from "../models/reward-event.model.js";
-import { RewardTemplateModel } from "../models/reward-template.model.js";
+import { RewardEventConfigModel } from "../models/reward-event-config.model.js";
 import { ScheduleSettingsModel } from "../models/schedule-settings.model.js";
 import { recommendNextSchedule } from "../services/scheduler-client.js";
 
@@ -47,23 +47,14 @@ async function scheduleProfile(
     return;
   }
 
-  const templates = await RewardTemplateModel.find({ profileId: profile.id, enabled: true })
+  const eventConfigs = await RewardEventConfigModel.find({ profileId: profile.id, enabled: true })
     .sort({ createdAt: -1 })
     .lean();
-  const templatesByCategory = new Map<string, (typeof templates)[number]>();
-  for (const template of templates) {
-    if (!templatesByCategory.has(template.category)) {
-      templatesByCategory.set(template.category, template);
-    }
-  }
 
-  for (const [category, template] of templatesByCategory.entries()) {
-    const categoryTemplateIds = templates
-      .filter((candidate) => candidate.category === category)
-      .map((candidate) => candidate._id);
+  for (const eventConfig of eventConfigs) {
     const existingUpcoming = await RewardEventModel.findOne({
       profileId: profile.id,
-      templateId: { $in: categoryTemplateIds },
+      $or: [{ eventConfigId: eventConfig._id }, { templateId: eventConfig._id }],
       status: { $in: ["SCHEDULED", "RESCHEDULED"] },
       scheduledAt: { $gt: new Date() }
     });
@@ -74,50 +65,62 @@ async function scheduleProfile(
 
     const historyDocs = await RewardEventModel.find({
       profileId: profile.id,
-      templateId: template._id
+      $or: [{ eventConfigId: eventConfig._id }, { templateId: eventConfig._id }]
     })
       .sort({ scheduledAt: -1 })
       .limit(60)
       .lean();
 
-    const recommendation = await recommendNextSchedule({
-      seed: deterministicSeed(`${profile.id}:${template._id.toString()}`),
-      now: new Date().toISOString(),
-      template: {
-        id: template._id.toString(),
-        name: template.name,
-        baseIntervalDays: template.baseIntervalDays,
-        jitterPct: template.jitterPct
-      },
-      settings: {
-        timezone: settings.timezone,
-        minGapHours: settings.minGapHours,
-        allowedWindows: settings.allowedWindows.map((window) => ({
-          weekday: window.weekday,
-          startLocalTime: window.startLocalTime,
-          endLocalTime: window.endLocalTime
-        })),
-        blackoutDates: settings.blackoutDates.map((blackout) => ({
-          startAt: blackout.startAt.toISOString(),
-          endAt: blackout.endAt?.toISOString(),
-          allDay: blackout.allDay,
-          note: blackout.note ?? undefined
+    let recommendation: { scheduledAt: string; rationale: string };
+    try {
+      recommendation = await recommendNextSchedule({
+        seed: deterministicSeed(`${profile.id}:${eventConfig._id.toString()}`),
+        now: new Date().toISOString(),
+        eventConfig: {
+          id: eventConfig._id.toString(),
+          name: eventConfig.name,
+          baseIntervalDays: eventConfig.baseIntervalDays,
+          jitterPct: eventConfig.jitterPct
+        },
+        settings: {
+          timezone: settings.timezone,
+          minGapHours: settings.minGapHours,
+          allowedWindows: settings.allowedWindows.map((window) => ({
+            weekday: window.weekday,
+            startLocalTime: window.startLocalTime,
+            endLocalTime: window.endLocalTime
+          })),
+          recurringBlackoutWeekdays: settings.recurringBlackoutWeekdays ?? [],
+          blackoutDates: settings.blackoutDates.map((blackout) => ({
+            startAt: blackout.startAt.toISOString(),
+            endAt: blackout.endAt?.toISOString(),
+            allDay: blackout.allDay,
+            note: blackout.note ?? undefined
+          }))
+        },
+        eventHistory: historyDocs.map((doc) => ({
+          scheduledAt: doc.scheduledAt.toISOString(),
+          status: doc.status,
+          completedAt: doc.completedAt?.toISOString(),
+          missedAt: doc.missedAt?.toISOString(),
+          sentimentLevel: (doc.sentimentLevel as SentimentLevel | null) ?? undefined
         }))
-      },
-      eventHistory: historyDocs.map((doc) => ({
-        scheduledAt: doc.scheduledAt.toISOString(),
-        status: doc.status,
-        completedAt: doc.completedAt?.toISOString(),
-        missedAt: doc.missedAt?.toISOString(),
-        sentimentLevel: (doc.sentimentLevel as SentimentLevel | null) ?? undefined
-      }))
-    });
+      });
+    } catch (error) {
+      logger.warn(
+        { profileId: profile.id, eventConfigId: eventConfig._id.toString(), error },
+        "Failed to compute next schedule for event config"
+      );
+      continue;
+    }
 
     const event = await RewardEventModel.create({
       profileId: profile.id,
-      templateId: template._id,
+      eventConfigId: eventConfig._id,
+      templateId: eventConfig._id,
       scheduledAt: new Date(recommendation.scheduledAt),
       originalScheduledAt: new Date(recommendation.scheduledAt),
+      hasExplicitTime: false,
       status: "SCHEDULED",
       adjustments: []
     });

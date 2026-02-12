@@ -6,7 +6,7 @@ import { EmailLogModel } from "../models/email-log.model.js";
 import { IdempotencyKeyModel } from "../models/idempotency-key.model.js";
 import { ProfileModel } from "../models/profile.model.js";
 import { RewardEventModel } from "../models/reward-event.model.js";
-import { RewardTemplateModel } from "../models/reward-template.model.js";
+import { RewardEventConfigModel } from "../models/reward-event-config.model.js";
 import { UserModel } from "../models/user.model.js";
 
 const logger = pino({ name: "email-reminder-worker" });
@@ -33,9 +33,10 @@ export async function processEmailReminder(job: Job<EmailReminderJobData>): Prom
   }
 
   const profile = await ProfileModel.findById(event.profileId);
-  const template = await RewardTemplateModel.findById(event.templateId);
-  if (!profile || !template) {
-    logger.warn({ eventId }, "Profile or template not found for reminder");
+  const eventConfigId = event.eventConfigId ?? event.templateId;
+  const eventConfig = await RewardEventConfigModel.findById(eventConfigId);
+  if (!profile || !eventConfig) {
+    logger.warn({ eventId }, "Profile or event config not found for reminder");
     return;
   }
 
@@ -48,7 +49,7 @@ export async function processEmailReminder(job: Job<EmailReminderJobData>): Prom
   const messageId = await sendReminderEmail({
     recipient: user.email,
     profileName: profile.profileName,
-    templateName: template.name,
+    templateName: eventConfig.name,
     scheduledAt: event.scheduledAt.toISOString(),
     timezone: user.timezone
   });
@@ -62,7 +63,7 @@ export async function processEmailReminder(job: Job<EmailReminderJobData>): Prom
   await EmailLogModel.create({
     eventId,
     recipient: user.email,
-    template: template.name,
+    template: eventConfig.name,
     status: "SENT",
     providerMessageId: messageId,
     sentAt: new Date()
